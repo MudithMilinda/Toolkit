@@ -1,12 +1,106 @@
-@import "tailwindcss";
+@import 'tailwindcss';
+@import '../components/RadialMenu/radialMenu.css';
 
 :root {
-  font-family: Inter, system-ui, sans-serif;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
   color: #f8fafc;
-  background: #090b16;
+  background: transparent;
 }
-
-body {
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  width: 100%;
+  height: 100%;
   margin: 0;
-  min-height: 100vh;
+  overflow: hidden;
+  background: transparent;
+}
+button {
+  font: inherit;
+}
+.app-shell {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  overflow: hidden;
+}
+.radial-utility {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+}
+.drop-zone {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  cursor: default;
+  transition: background 0.18s ease;
+}
+.drop-zone.is-dragging {
+  background: radial-gradient(circle, rgba(34, 211, 238, 0.22), transparent 64%);
+}
+.drop-zone.is-dragging::after {
+  content: 'Release to load file';
+  position: absolute;
+  top: 21px;
+  z-index: 4;
+  padding: 5px 10px;
+  border: 1px solid rgba(103, 232, 249, 0.34);
+  border-radius: 999px;
+  color: #d9feff;
+  background: rgba(5, 12, 24, 0.76);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.file-input {
+  display: none;
+}
+.clear-button {
+  position: absolute;
+  right: 45px;
+  top: 48px;
+  z-index: 5;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  padding: 5px 8px;
+  color: #bac4d9;
+  background: rgba(9, 11, 22, 0.62);
+  font-size: 10px;
+  cursor: pointer;
+}
+.clear-button:hover {
+  color: #fff;
+  background: rgba(139, 92, 246, 0.28);
+}
+.compact-stage {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+}
+.utility-notice {
+  position: absolute;
+  z-index: 5;
+  bottom: 24px;
+  margin: 0;
+  max-width: 300px;
+  padding: 7px 11px;
+  border: 1px solid rgba(103, 232, 249, 0.25);
+  border-radius: 999px;
+  color: #cffafe;
+  background: rgba(7, 20, 33, 0.82);
+  backdrop-filter: blur(12px);
+  font-size: 10px;
+  text-align: center;
 }

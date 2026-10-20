@@ -1,8 +1,10 @@
-import { ElectronAPI } from '@electron-toolkit/preload'
-
 declare global {
   interface Window {
-    electron: ElectronAPI
-    api: unknown
+    api: {
+      closeRadialMenu: () => Promise<void>
+      onRadialMenuOpened: (listener: () => void) => () => void
+    }
   }
 }
+
+export {}
