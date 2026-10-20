@@ -50,6 +50,12 @@ body,
     stroke 0.18s ease;
 }
 
+/* Avoid Chromium's rectangular SVG focus ring; onFocus still applies the glass highlight. */
+.radial-segment-group:focus,
+.radial-segment-group:focus-visible {
+  outline: none;
+}
+
 .radial-segment.active,
 .radial-segment.selected {
   fill: rgba(139, 92, 246, 0.24);

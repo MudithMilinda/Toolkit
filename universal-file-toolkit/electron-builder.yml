@@ -1,5 +1,5 @@
-appId: com.electron.app
-productName: universal-file-toolkit
+appId: com.universalfiletoolkit.desktop
+productName: Universal File Toolkit
 directories:
   buildResources: build
 files:
@@ -19,15 +19,18 @@ nsis:
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
 mac:
+  icon: build/icon.icns
+  category: public.app-category.productivity
+  # Keep local DMG builds usable without an Apple Developer signing identity.
+  identity: null
+  target:
+    - target: dmg
+      arch:
+        - arm64
   entitlementsInherit: build/entitlements.mac.plist
-  extendInfo:
-    - NSCameraUsageDescription: Application requests access to the device's camera.
-    - NSMicrophoneUsageDescription: Application requests access to the device's microphone.
-    - NSDocumentsFolderUsageDescription: Application requests access to the user's Documents folder.
-    - NSDownloadsFolderUsageDescription: Application requests access to the user's Downloads folder.
   notarize: false
 dmg:
-  artifactName: ${name}-${version}.${ext}
+  artifactName: universal-file-toolkit-${version}-${arch}.${ext}
 linux:
   target:
     - AppImage

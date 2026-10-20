@@ -113,17 +113,13 @@ export default function RadialSegment({
               : FileOutput
   return (
     <motion.g
+      className="radial-segment-group"
       role="button"
-      tabIndex={0}
       aria-label={operation.label}
       onMouseEnter={onHover}
-      onFocus={onHover}
       onClick={(event) => {
         event.stopPropagation()
         onSelect()
-      }}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') onSelect()
       }}
       animate={{ scale: active ? 1.035 : 1 }}
       transition={{ type: 'spring', stiffness: 420, damping: 24 }}

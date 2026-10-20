@@ -1,10 +1,9 @@
 {
   "name": "universal-file-toolkit",
   "version": "1.0.0",
-  "description": "An Electron application with React and TypeScript",
+  "description": "A floating local file utility with a radial operation menu",
   "main": "./out/main/index.js",
-  "author": "example.com",
-  "homepage": "https://electron-vite.org",
+  "author": "Universal File Toolkit",
   "scripts": {
     "format": "prettier --write .",
     "lint": "eslint --cache .",
@@ -17,7 +16,8 @@
     "postinstall": "install-electron && electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
-    "build:mac": "electron-vite build && electron-builder --mac",
+    "build:mac": "npm run build && electron-builder --mac dmg --arm64",
+    "build:mac:x64": "npm run build && electron-builder --mac dmg --x64",
     "build:linux": "electron-vite build && electron-builder --linux"
   },
   "dependencies": {

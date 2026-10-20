@@ -2,9 +2,11 @@ import { app, BrowserWindow, globalShortcut, ipcMain, Menu, screen, Tray } from 
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import { createNativeIntegration } from './native-integration'
 
 let radialWindow: BrowserWindow | null = null
 let tray: Tray | null = null
+const nativeIntegration = createNativeIntegration()
 const MENU_SIZE = 390
 const shortcuts =
   process.platform === 'darwin'
@@ -28,6 +30,11 @@ function showRadialMenu(): void {
   radialWindow.show()
   radialWindow.focus()
   radialWindow.webContents.send('radial-menu:opened')
+}
+
+function showSettings(): void {
+  showRadialMenu()
+  radialWindow?.webContents.send('radial-menu:settings')
 }
 
 function createWindow(): void {
@@ -80,6 +87,7 @@ function createTray(): void {
         accelerator: 'CommandOrControl+Alt+Space',
         click: showRadialMenu
       },
+      { label: 'Settings', click: showSettings },
       { type: 'separator' },
       { label: 'Quit', click: () => app.quit() }
     ])
@@ -104,6 +112,7 @@ app.whenReady().then(() => {
 
   createWindow()
   createTray()
+  nativeIntegration.start()
   for (const shortcut of shortcuts) {
     if (!globalShortcut.register(shortcut, showRadialMenu)) {
       console.error(`Unable to register ${shortcut}; it may be used by another application.`)
@@ -125,7 +134,10 @@ app.on('window-all-closed', () => {
   // The tray utility remains active without an open radial window.
 })
 
-app.on('will-quit', () => globalShortcut.unregisterAll())
+app.on('will-quit', () => {
+  nativeIntegration.stop()
+  globalShortcut.unregisterAll()
+})
 
 // In this file you can include the rest of your app's specific main process
 // code. You can also put them in separate files and require them here.

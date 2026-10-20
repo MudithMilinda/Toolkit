@@ -34,6 +34,13 @@ function App(): React.JSX.Element {
     setIsClosing(false)
   }, [reset])
   useEffect(() => window.api.onRadialMenuOpened(resetMenu), [resetMenu])
+  useEffect(
+    () =>
+      window.api.onSettingsRequested(() => {
+        setNotice('Settings will be available when conversion preferences are implemented.')
+      }),
+    []
+  )
   const operations = file ? getOperationsForFile(file.name) : getOperationsForFile('sample.png')
 
   return (

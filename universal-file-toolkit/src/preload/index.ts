@@ -8,6 +8,11 @@ const api = Object.freeze({
     const handler = (): void => listener()
     ipcRenderer.on('radial-menu:opened', handler)
     return () => ipcRenderer.removeListener('radial-menu:opened', handler)
+  },
+  onSettingsRequested: (listener: () => void): (() => void) => {
+    const handler = (): void => listener()
+    ipcRenderer.on('radial-menu:settings', handler)
+    return () => ipcRenderer.removeListener('radial-menu:settings', handler)
   }
 })
 
