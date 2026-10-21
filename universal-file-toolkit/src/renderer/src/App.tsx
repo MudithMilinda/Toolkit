@@ -17,6 +17,12 @@ function App(): React.JSX.Element {
         setNotice('Drop a file into the center first.')
         return
       }
+      void window.api.simulateOperation({
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        operationId: nextOperation.id
+      })
       setOperation(nextOperation)
       setNotice(`${nextOperation.label} is simulated — no file was changed.`)
       window.setTimeout(() => void window.api.closeRadialMenu(), 650)

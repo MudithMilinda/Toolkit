@@ -7,13 +7,54 @@ import { createNativeIntegration } from './native-integration'
 let radialWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 const nativeIntegration = createNativeIntegration()
+let nativeDismissTimer: ReturnType<typeof setTimeout> | null = null
+let nativeDragCandidateVisible = false
 const MENU_SIZE = 390
 const shortcuts =
   process.platform === 'darwin'
     ? ['CommandOrControl+Shift+Space', 'Control+Shift+Space', 'CommandOrControl+Alt+Space']
     : ['CommandOrControl+Shift+Space', 'CommandOrControl+Alt+Space']
+const allowedOperationIds = new Set([
+  'png',
+  'jpg',
+  'webp',
+  'resize',
+  'compress',
+  'crop',
+  'merge',
+  'split',
+  'extract',
+  'mp4',
+  'webm',
+  'audio',
+  'trim',
+  'metadata',
+  'mp3',
+  'wav',
+  'aac'
+])
 
-function showRadialMenu(): void {
+function isValidMockOperation(
+  value: unknown
+): value is { name: string; size: number; type: string; operationId: string } {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return (
+    typeof candidate.name === 'string' &&
+    candidate.name.length > 0 &&
+    candidate.name.length <= 512 &&
+    !candidate.name.includes('\0') &&
+    typeof candidate.size === 'number' &&
+    Number.isFinite(candidate.size) &&
+    candidate.size >= 0 &&
+    typeof candidate.type === 'string' &&
+    candidate.type.length <= 128 &&
+    typeof candidate.operationId === 'string' &&
+    allowedOperationIds.has(candidate.operationId)
+  )
+}
+
+function showRadialMenu(focus = true): void {
   if (!radialWindow) return
   const cursor = screen.getCursorScreenPoint()
   const display = screen.getDisplayNearestPoint(cursor)
@@ -27,9 +68,20 @@ function showRadialMenu(): void {
       Math.min(Math.max(cursor.y - MENU_SIZE / 2, y + padding), y + height - MENU_SIZE - padding)
     )
   )
-  radialWindow.show()
-  radialWindow.focus()
+  if (focus) {
+    radialWindow.show()
+    radialWindow.focus()
+  } else {
+    radialWindow.showInactive()
+  }
   radialWindow.webContents.send('radial-menu:opened')
+}
+
+function showNativeDragCandidate(): void {
+  if (nativeDismissTimer) clearTimeout(nativeDismissTimer)
+  nativeDragCandidateVisible = true
+  // Experimental: a newly shown window may not join a Finder drag already in progress.
+  showRadialMenu(false)
 }
 
 function showSettings(): void {
@@ -60,7 +112,9 @@ function createWindow(): void {
   })
 
   radialWindow.setAlwaysOnTop(true, 'floating')
-  radialWindow.on('blur', () => radialWindow?.hide())
+  radialWindow.on('blur', () => {
+    if (!nativeDragCandidateVisible) radialWindow?.hide()
+  })
   radialWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
 
   // HMR for renderer base on electron-vite cli.
@@ -80,19 +134,19 @@ function createTray(): void {
       {
         label: 'Open radial menu',
         accelerator: 'CommandOrControl+Shift+Space',
-        click: showRadialMenu
+        click: () => showRadialMenu()
       },
       {
         label: 'Open radial menu (fallback)',
         accelerator: 'CommandOrControl+Alt+Space',
-        click: showRadialMenu
+        click: () => showRadialMenu()
       },
       { label: 'Settings', click: showSettings },
       { type: 'separator' },
       { label: 'Quit', click: () => app.quit() }
     ])
   )
-  tray.on('click', showRadialMenu)
+  tray.on('click', () => showRadialMenu())
 }
 
 // This method will be called when Electron has finished
@@ -112,13 +166,34 @@ app.whenReady().then(() => {
 
   createWindow()
   createTray()
-  nativeIntegration.start()
+  nativeIntegration.start({
+    onShiftDragCandidate: showNativeDragCandidate,
+    onGestureEnded: () => {
+      if (nativeDismissTimer) clearTimeout(nativeDismissTimer)
+      nativeDismissTimer = setTimeout(() => {
+        nativeDragCandidateVisible = false
+        radialWindow?.hide()
+      }, 1200)
+    },
+    onStatus: (status) => console.info(`[native integration] ${status.detail}`)
+  })
   for (const shortcut of shortcuts) {
     if (!globalShortcut.register(shortcut, showRadialMenu)) {
       console.error(`Unable to register ${shortcut}; it may be used by another application.`)
     }
   }
-  ipcMain.handle('radial-menu:close', () => radialWindow?.hide())
+  ipcMain.handle('radial-menu:close', () => {
+    nativeDragCandidateVisible = false
+    radialWindow?.hide()
+  })
+  ipcMain.on('radial-menu:drop-received', () => {
+    if (nativeDismissTimer) clearTimeout(nativeDismissTimer)
+    nativeDragCandidateVisible = false
+  })
+  ipcMain.handle('conversion:simulate', (_, payload: unknown) => {
+    if (!isValidMockOperation(payload)) throw new Error('Invalid mock conversion request')
+    return { accepted: true, simulated: true }
+  })
 
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the
@@ -136,6 +211,7 @@ app.on('window-all-closed', () => {
 
 app.on('will-quit', () => {
   nativeIntegration.stop()
+  if (nativeDismissTimer) clearTimeout(nativeDismissTimer)
   globalShortcut.unregisterAll()
 })
 

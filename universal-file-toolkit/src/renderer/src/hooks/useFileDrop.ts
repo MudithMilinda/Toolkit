@@ -33,7 +33,10 @@ export function useFileDrop(): {
     depth.current = 0
     setIsDragging(false)
     const next = event.dataTransfer.files?.[0]
-    if (next) setFile(next)
+    if (next) {
+      window.api.notifyDropReceived()
+      setFile(next)
+    }
   }, [])
   return {
     file,

@@ -12,12 +12,14 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
+    "dev:mac": "npm run build:native:mac && electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
+    "build:native:mac": "sh native/macos/build-helper.sh",
     "postinstall": "install-electron && electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
-    "build:mac": "npm run build && electron-builder --mac dmg --arm64",
-    "build:mac:x64": "npm run build && electron-builder --mac dmg --x64",
+    "build:mac": "npm run build:native:mac && npm run build && electron-builder --mac dmg --arm64",
+    "build:mac:x64": "npm run build:native:mac && npm run build && electron-builder --mac dmg --x64",
     "build:linux": "electron-vite build && electron-builder --linux"
   },
   "dependencies": {
