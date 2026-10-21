@@ -11,21 +11,39 @@ function App(): React.JSX.Element {
   const [operation, setOperation] = useState<FileOperation | null>(null)
   const [isClosing, setIsClosing] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const [isProcessing, setIsProcessing] = useState(false)
   const handleOperation = useCallback(
     (nextOperation: FileOperation) => {
       if (!file) {
         setNotice('Drop a file into the center first.')
         return
       }
-      void window.api.simulateOperation({
-        name: file.name,
-        size: file.size,
-        type: file.type,
-        operationId: nextOperation.id
-      })
       setOperation(nextOperation)
-      setNotice(`${nextOperation.label} is simulated — no file was changed.`)
-      window.setTimeout(() => void window.api.closeRadialMenu(), 650)
+      if (!['png', 'jpg', 'webp'].includes(nextOperation.id)) {
+        setNotice(`${nextOperation.label} options are coming in the next image milestone.`)
+        return
+      }
+      const inputPath = window.api.getPathForFile(file)
+      if (!inputPath) {
+        setNotice('The dropped file path could not be read. Please drop the file again.')
+        return
+      }
+      setIsProcessing(true)
+      setNotice(`Converting ${file.name} to ${nextOperation.label}…`)
+      void window.api
+        .convertImage({ inputPath, targetFormat: nextOperation.id as 'png' | 'jpg' | 'webp' })
+        .then((result) => {
+          const sizeNote =
+            result.savedPercent > 0
+              ? ` ${result.savedPercent}% smaller.`
+              : ' Output size may be larger.'
+          setNotice(`Saved ${result.outputPath.split(/[\\/]/).pop()}.${sizeNote}`)
+          window.setTimeout(() => void window.api.closeRadialMenu(), 1400)
+        })
+        .catch((error: unknown) => {
+          setNotice(error instanceof Error ? error.message : 'Image conversion failed.')
+        })
+        .finally(() => setIsProcessing(false))
     },
     [file]
   )
@@ -72,7 +90,7 @@ function App(): React.JSX.Element {
                   file={file}
                   operations={operations}
                   selectedOperation={operation}
-                  onSelect={handleOperation}
+                  onSelect={isProcessing ? () => undefined : handleOperation}
                   onDismiss={dismiss}
                 />
               </motion.div>

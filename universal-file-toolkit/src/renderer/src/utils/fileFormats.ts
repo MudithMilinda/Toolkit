@@ -47,7 +47,9 @@ export function getFileExtension(filename: string): string {
 }
 export function getFileCategory(filename: string): FileCategory {
   const ext = getFileExtension(filename)
-  if (['png', 'jpg', 'jpeg', 'webp', 'heic'].includes(ext)) return 'image'
+  if (['png', 'jpg', 'jpeg', 'webp', 'avif', 'tif', 'tiff', 'gif', 'heic', 'heif'].includes(ext)) {
+    return 'image'
+  }
   if (ext === 'pdf') return 'document'
   if (['mp4', 'mov', 'webm'].includes(ext)) return 'video'
   if (['mp3', 'wav', 'aac'].includes(ext)) return 'audio'

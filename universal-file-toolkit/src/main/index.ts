@@ -1,12 +1,24 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, screen, Tray } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  globalShortcut,
+  ipcMain,
+  Menu,
+  Notification,
+  screen,
+  Tray
+} from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { createNativeIntegration } from './native-integration'
+import { ConversionManager } from './services/conversion/ConversionManager'
+import type { ImageConversionRequest } from './services/conversion/types'
 
 let radialWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 const nativeIntegration = createNativeIntegration()
+const conversionManager = new ConversionManager()
 let nativeDismissTimer: ReturnType<typeof setTimeout> | null = null
 let nativeDragCandidateVisible = false
 const MENU_SIZE = 390
@@ -14,43 +26,18 @@ const shortcuts =
   process.platform === 'darwin'
     ? ['CommandOrControl+Shift+Space', 'Control+Shift+Space', 'CommandOrControl+Alt+Space']
     : ['CommandOrControl+Shift+Space', 'CommandOrControl+Alt+Space']
-const allowedOperationIds = new Set([
-  'png',
-  'jpg',
-  'webp',
-  'resize',
-  'compress',
-  'crop',
-  'merge',
-  'split',
-  'extract',
-  'mp4',
-  'webm',
-  'audio',
-  'trim',
-  'metadata',
-  'mp3',
-  'wav',
-  'aac'
-])
-
-function isValidMockOperation(
-  value: unknown
-): value is { name: string; size: number; type: string; operationId: string } {
+function isImageConversionRequest(value: unknown): value is ImageConversionRequest {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Record<string, unknown>
   return (
-    typeof candidate.name === 'string' &&
-    candidate.name.length > 0 &&
-    candidate.name.length <= 512 &&
-    !candidate.name.includes('\0') &&
-    typeof candidate.size === 'number' &&
-    Number.isFinite(candidate.size) &&
-    candidate.size >= 0 &&
-    typeof candidate.type === 'string' &&
-    candidate.type.length <= 128 &&
-    typeof candidate.operationId === 'string' &&
-    allowedOperationIds.has(candidate.operationId)
+    typeof candidate.inputPath === 'string' &&
+    candidate.inputPath.length > 0 &&
+    candidate.inputPath.length <= 16_384 &&
+    !candidate.inputPath.includes('\0') &&
+    (candidate.targetFormat === 'png' ||
+      candidate.targetFormat === 'jpg' ||
+      candidate.targetFormat === 'webp') &&
+    (candidate.options === undefined || typeof candidate.options === 'object')
   )
 }
 
@@ -190,9 +177,16 @@ app.whenReady().then(() => {
     if (nativeDismissTimer) clearTimeout(nativeDismissTimer)
     nativeDragCandidateVisible = false
   })
-  ipcMain.handle('conversion:simulate', (_, payload: unknown) => {
-    if (!isValidMockOperation(payload)) throw new Error('Invalid mock conversion request')
-    return { accepted: true, simulated: true }
+  ipcMain.handle('conversion:image', async (_, payload: unknown) => {
+    if (!isImageConversionRequest(payload)) throw new Error('Invalid image conversion request.')
+    const result = await conversionManager.convertImage(payload)
+    if (Notification.isSupported()) {
+      new Notification({
+        title: 'Conversion Complete',
+        body: `${result.inputPath.split(/[\\/]/).pop()} converted to ${result.outputPath.split(/[\\/]/).pop()}.`
+      }).show()
+    }
+    return result
   })
 
   app.on('activate', function () {
