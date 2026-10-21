@@ -9,11 +9,12 @@ const entries = (values: string[][]): FileOperation[] =>
 const operationMap: Record<FileCategory, FileOperation[]> = {
   image: entries([
     ['png', 'PNG'],
-    ['jpg', 'JPG'],
+    ['pdf', 'PDF'],
     ['webp', 'WEBP'],
-    ['resize', 'Resize'],
-    ['compress', 'Compress'],
-    ['crop', 'Crop']
+    ['heic', 'HEIC'],
+    ['tiff', 'TIFF'],
+    ['avif', 'AVIF'],
+    ['jpg', 'JPG']
   ]),
   document: entries([
     ['png', 'PNG'],
@@ -57,6 +58,20 @@ export function getFileCategory(filename: string): FileCategory {
 }
 export const getOperationsForFile = (filename: string): FileOperation[] =>
   operationMap[getFileCategory(filename)]
+
+/** Image-only actions, revealed while the Command key is held. */
+const imageToolOperations = entries([
+  ['compress', 'Compress'],
+  ['metadata', 'Metadata'],
+  ['edit', 'Edit'],
+  ['annotate', 'Annotate'],
+  ['add-background', 'Add BG'],
+  ['crop', 'Crop'],
+  ['redact', 'Redact']
+])
+
+export const getFileToolOperations = (filename: string): FileOperation[] =>
+  getFileCategory(filename) === 'image' ? imageToolOperations : getOperationsForFile(filename)
 export const formatFileSize = (bytes: number): string =>
   bytes < 1024
     ? `${bytes} B`

@@ -2,11 +2,14 @@ import { useCallback, useRef, useState, type DragEvent } from 'react'
 export function useFileDrop(): {
   file: File | null
   isDragging: boolean
+  loadFile: (file: File) => void
   reset: () => void
+  clearDragging: () => void
   dragHandlers: Record<string, (event: DragEvent<HTMLElement>) => void>
 } {
   const [file, setFile] = useState<File | null>(null)
   const [isDragging, setIsDragging] = useState(false)
+  const loadFile = useCallback((next: File): void => setFile(next), [])
   const depth = useRef(0)
   const hasFiles = (event: DragEvent<HTMLElement>): boolean =>
     Array.from(event.dataTransfer.types).includes('Files')
@@ -28,21 +31,29 @@ export function useFileDrop(): {
     }
   }, [])
   const onDragOver = useCallback((event: DragEvent<HTMLElement>) => event.preventDefault(), [])
-  const onDrop = useCallback((event: DragEvent<HTMLElement>) => {
-    event.preventDefault()
-    depth.current = 0
-    setIsDragging(false)
-    const next = event.dataTransfer.files?.[0]
-    if (next) {
-      window.api.notifyDropReceived()
-      setFile(next)
-    }
-  }, [])
+  const onDrop = useCallback(
+    (event: DragEvent<HTMLElement>) => {
+      event.preventDefault()
+      depth.current = 0
+      setIsDragging(false)
+      const next = event.dataTransfer.files?.[0]
+      if (next) {
+        window.api.notifyDropReceived()
+        loadFile(next)
+      }
+    },
+    [loadFile]
+  )
   return {
     file,
     isDragging,
+    loadFile,
     reset: () => {
       setFile(null)
+      setIsDragging(false)
+      depth.current = 0
+    },
+    clearDragging: () => {
       setIsDragging(false)
       depth.current = 0
     },

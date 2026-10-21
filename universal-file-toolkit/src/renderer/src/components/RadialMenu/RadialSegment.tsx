@@ -1,5 +1,17 @@
+import type { DragEvent } from 'react'
 import type { FileOperation } from '../../utils/fileFormats'
-import { Archive, FileOutput, Image, Info, Music2, Scissors } from 'lucide-react'
+import {
+  Archive,
+  FileOutput,
+  Image,
+  ImagePlus,
+  Info,
+  Music2,
+  Pencil,
+  Scissors,
+  SlidersHorizontal,
+  UserRoundX
+} from 'lucide-react'
 import { motion } from 'motion/react'
 
 interface Props {
@@ -10,6 +22,7 @@ interface Props {
   selected: boolean
   onHover: () => void
   onSelect: () => void
+  onFileDrop?: (file: File) => void
 }
 
 const CX = 150
@@ -70,7 +83,9 @@ function roundedSegmentPath(index: number, total: number): string {
   ] as Point
   const g = circlePoint(R_IN, angleOf(innerEnd) - innerCorner / R_IN)
   const h = circlePoint(R_IN, angleOf(innerStart) + innerCorner / R_IN)
-  const outerLarge = Math.abs(angleOf(d) - angleOf(c)) > Math.PI ? 1 : 0
+  // Every menu slice is smaller than a semicircle. Comparing atan2 values here
+  // breaks at the -π/π boundary and turns the left-hand slice into a giant arc.
+  const outerLarge = step > 180 ? 1 : 0
   return [
     `M ${fixed(a[0])} ${fixed(a[1])}`,
     `L ${fixed(b[0])} ${fixed(b[1])}`,
@@ -92,25 +107,34 @@ export default function RadialSegment({
   active,
   selected,
   onHover,
-  onSelect
+  onSelect,
+  onFileDrop
 }: Props): React.JSX.Element {
   const labelAngle = radians(-90 + index * (360 / total))
   const [x, y] = circlePoint((R_IN + R_OUT) / 2 + 3, labelAngle)
   const Icon =
     operation.id === 'compress'
       ? Archive
-      : operation.id === 'crop' || operation.id === 'trim'
-        ? Scissors
-        : operation.id === 'metadata'
-          ? Info
-          : operation.id === 'audio' ||
-              operation.id === 'mp3' ||
-              operation.id === 'wav' ||
-              operation.id === 'aac'
-            ? Music2
-            : operation.id === 'png' || operation.id === 'jpg' || operation.id === 'webp'
-              ? Image
-              : FileOutput
+      : operation.id === 'redact'
+        ? UserRoundX
+        : operation.id === 'annotate'
+          ? Pencil
+          : operation.id === 'edit'
+            ? SlidersHorizontal
+            : operation.id === 'add-background'
+              ? ImagePlus
+              : operation.id === 'crop' || operation.id === 'trim'
+                ? Scissors
+                : operation.id === 'metadata'
+                  ? Info
+                  : operation.id === 'audio' ||
+                      operation.id === 'mp3' ||
+                      operation.id === 'wav' ||
+                      operation.id === 'aac'
+                    ? Music2
+                    : operation.id === 'png' || operation.id === 'jpg' || operation.id === 'webp'
+                      ? Image
+                      : FileOutput
   return (
     <motion.g
       className="radial-segment-group"
@@ -120,6 +144,21 @@ export default function RadialSegment({
       onClick={(event) => {
         event.stopPropagation()
         onSelect()
+      }}
+      onDrop={(event: DragEvent<SVGGElement>) => {
+        const file = event.dataTransfer.files?.[0]
+        if (!file) return
+        event.preventDefault()
+        event.stopPropagation()
+        onFileDrop?.(file)
+      }}
+      onDragEnter={(event: DragEvent<SVGGElement>) => {
+        event.preventDefault()
+        onHover()
+      }}
+      onDragOver={(event: DragEvent<SVGGElement>) => {
+        event.preventDefault()
+        onHover()
       }}
       animate={{ scale: active ? 1.035 : 1 }}
       transition={{ type: 'spring', stiffness: 420, damping: 24 }}

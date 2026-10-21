@@ -14,7 +14,8 @@ export class OutputManager {
   async publishTemporaryFile(
     temporaryPath: string,
     inputPath: string,
-    targetExtension: string
+    targetExtension: string,
+    nameSuffix = ''
   ): Promise<string> {
     const directory = dirname(inputPath)
     await mkdir(directory, { recursive: true })
@@ -24,7 +25,7 @@ export class OutputManager {
 
     for (let index = 0; index < 10_000; index += 1) {
       const suffix = index === 0 ? '' : ` (${index})`
-      const outputPath = join(directory, `${safeName}${suffix}.${extension}`)
+      const outputPath = join(directory, `${safeName}${nameSuffix}${suffix}.${extension}`)
       try {
         // A hard link is an atomic, exclusive publish operation on the same volume.
         // It avoids overwriting a file created by another process between existence checks.

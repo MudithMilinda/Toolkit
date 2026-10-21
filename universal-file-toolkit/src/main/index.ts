@@ -9,11 +9,19 @@ import {
   Tray
 } from 'electron'
 import { join } from 'path'
+import { readFile, stat } from 'node:fs/promises'
+import { isAbsolute, resolve } from 'node:path'
+import sharp from 'sharp'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { createNativeIntegration } from './native-integration'
 import { ConversionManager } from './services/conversion/ConversionManager'
-import type { ImageConversionRequest } from './services/conversion/types'
+import type {
+  ImageCompressionRequest,
+  ImageCropRequest,
+  ImageConversionRequest,
+  ImageResizeRequest
+} from './services/conversion/types'
 
 let radialWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -21,7 +29,8 @@ const nativeIntegration = createNativeIntegration()
 const conversionManager = new ConversionManager()
 let nativeDismissTimer: ReturnType<typeof setTimeout> | null = null
 let nativeDragCandidateVisible = false
-const MENU_SIZE = 390
+// The crop editor needs room for a comfortably sized preview and its controls.
+const MENU_SIZE = 560
 const shortcuts =
   process.platform === 'darwin'
     ? ['CommandOrControl+Shift+Space', 'Control+Shift+Space', 'CommandOrControl+Alt+Space']
@@ -34,10 +43,67 @@ function isImageConversionRequest(value: unknown): value is ImageConversionReque
     candidate.inputPath.length > 0 &&
     candidate.inputPath.length <= 16_384 &&
     !candidate.inputPath.includes('\0') &&
-    (candidate.targetFormat === 'png' ||
-      candidate.targetFormat === 'jpg' ||
-      candidate.targetFormat === 'webp') &&
+    ['png', 'jpg', 'webp', 'pdf', 'heic', 'tiff', 'avif', 'bmp'].includes(
+      String(candidate.targetFormat)
+    ) &&
     (candidate.options === undefined || typeof candidate.options === 'object')
+  )
+}
+
+function hasSafeInputPath(value: Record<string, unknown>): value is Record<string, unknown> & {
+  inputPath: string
+} {
+  return (
+    typeof value.inputPath === 'string' &&
+    value.inputPath.length > 0 &&
+    value.inputPath.length <= 16_384 &&
+    !value.inputPath.includes('\0')
+  )
+}
+
+function isImageResizeRequest(value: unknown): value is ImageResizeRequest {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  const dimension = (item: unknown): boolean =>
+    item === undefined ||
+    (typeof item === 'number' && Number.isInteger(item) && item >= 1 && item <= 16_384)
+  return (
+    hasSafeInputPath(candidate) &&
+    candidate.operation === 'resize' &&
+    dimension(candidate.width) &&
+    dimension(candidate.height) &&
+    (candidate.width !== undefined || candidate.height !== undefined) &&
+    ['inside', 'cover', 'fill'].includes(String(candidate.fit)) &&
+    typeof candidate.withoutEnlargement === 'boolean'
+  )
+}
+
+function isImageCompressionRequest(value: unknown): value is ImageCompressionRequest {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return (
+    hasSafeInputPath(candidate) &&
+    candidate.operation === 'compress' &&
+    typeof candidate.quality === 'number' &&
+    Number.isInteger(candidate.quality) &&
+    candidate.quality >= 1 &&
+    candidate.quality <= 100
+  )
+}
+function isImageCropRequest(value: unknown): value is ImageCropRequest {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return (
+    hasSafeInputPath(candidate) &&
+    candidate.operation === 'crop' &&
+    ['left', 'top', 'width', 'height'].every(
+      (key) =>
+        typeof candidate[key] === 'number' &&
+        Number.isInteger(candidate[key]) &&
+        (candidate[key] as number) >= 0
+    ) &&
+    (candidate.width as number) > 0 &&
+    (candidate.height as number) > 0
   )
 }
 
@@ -64,11 +130,12 @@ function showRadialMenu(focus = true): void {
   radialWindow.webContents.send('radial-menu:opened')
 }
 
-function showNativeDragCandidate(): void {
+function showNativeDragCandidate(modifier: 'shift' | 'command'): void {
   if (nativeDismissTimer) clearTimeout(nativeDismissTimer)
   nativeDragCandidateVisible = true
   // Experimental: a newly shown window may not join a Finder drag already in progress.
   showRadialMenu(false)
+  radialWindow?.webContents.send('radial-menu:modifier', modifier)
 }
 
 function showSettings(): void {
@@ -154,13 +221,29 @@ app.whenReady().then(() => {
   createWindow()
   createTray()
   nativeIntegration.start({
-    onShiftDragCandidate: showNativeDragCandidate,
+    onModifierDragCandidate: showNativeDragCandidate,
+    onModifierChanged: (modifier) =>
+      radialWindow?.webContents.send('radial-menu:modifier', modifier),
+    onOutsideClick: ({ x, y }) => {
+      if (!radialWindow?.isVisible()) return
+      const bounds = radialWindow.getBounds()
+      const clickedInside =
+        x >= bounds.x &&
+        x <= bounds.x + bounds.width &&
+        y >= bounds.y &&
+        y <= bounds.y + bounds.height
+      if (!clickedInside) {
+        nativeDragCandidateVisible = false
+        radialWindow.hide()
+      }
+    },
     onGestureEnded: () => {
+      if (!nativeDragCandidateVisible) return
       if (nativeDismissTimer) clearTimeout(nativeDismissTimer)
       nativeDismissTimer = setTimeout(() => {
         nativeDragCandidateVisible = false
         radialWindow?.hide()
-      }, 1200)
+      }, 160)
     },
     onStatus: (status) => console.info(`[native integration] ${status.detail}`)
   })
@@ -187,6 +270,31 @@ app.whenReady().then(() => {
       }).show()
     }
     return result
+  })
+  ipcMain.handle('conversion:image-resize', async (_, payload: unknown) => {
+    if (!isImageResizeRequest(payload)) throw new Error('Invalid image resize request.')
+    return conversionManager.resizeImage(payload)
+  })
+  ipcMain.handle('conversion:image-compress', async (_, payload: unknown) => {
+    if (!isImageCompressionRequest(payload)) throw new Error('Invalid image compression request.')
+    return conversionManager.compressImage(payload)
+  })
+  ipcMain.handle('conversion:image-crop', async (_, payload: unknown) => {
+    if (!isImageCropRequest(payload)) throw new Error('Invalid image crop request.')
+    return conversionManager.cropImage(payload)
+  })
+  ipcMain.handle('image:preview', async (_, inputPath: unknown) => {
+    if (typeof inputPath !== 'string' || !isAbsolute(inputPath))
+      throw new Error('Invalid preview path.')
+    const path = resolve(inputPath)
+    const details = await stat(path)
+    if (!details.isFile() || details.size > 20 * 1024 * 1024)
+      throw new Error('Preview is unavailable for this file.')
+    const metadata = await sharp(path, { failOn: 'warning' }).metadata()
+    if (!metadata.format) throw new Error('Preview is not a valid image.')
+    const bytes = await readFile(path)
+    const mime = metadata.format === 'jpeg' ? 'image/jpeg' : `image/${metadata.format}`
+    return `data:${mime};base64,${bytes.toString('base64')}`
   })
 
   app.on('activate', function () {

@@ -46,42 +46,8 @@ button {
   cursor: default;
   transition: background 0.18s ease;
 }
-.drop-zone.is-dragging {
-  background: radial-gradient(circle, rgba(34, 211, 238, 0.22), transparent 64%);
-}
-.drop-zone.is-dragging::after {
-  content: 'Release to load file';
-  position: absolute;
-  top: 21px;
-  z-index: 4;
-  padding: 5px 10px;
-  border: 1px solid rgba(103, 232, 249, 0.34);
-  border-radius: 999px;
-  color: #d9feff;
-  background: rgba(5, 12, 24, 0.76);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-}
 .file-input {
   display: none;
-}
-.clear-button {
-  position: absolute;
-  right: 45px;
-  top: 48px;
-  z-index: 5;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: 999px;
-  padding: 5px 8px;
-  color: #bac4d9;
-  background: rgba(9, 11, 22, 0.62);
-  font-size: 10px;
-  cursor: pointer;
-}
-.clear-button:hover {
-  color: #fff;
-  background: rgba(139, 92, 246, 0.28);
 }
 .compact-stage {
   width: 100%;
@@ -103,4 +69,391 @@ button {
   backdrop-filter: blur(12px);
   font-size: 10px;
   text-align: center;
+}
+.image-options {
+  width: 292px;
+  padding: 15px;
+  border: 1px solid rgba(196, 181, 253, 0.32);
+  border-radius: 22px;
+  background: rgba(14, 18, 35, 0.78);
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, 0.35),
+    inset 0 1px rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(22px);
+}
+.image-options header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 15px;
+}
+.image-options-icon {
+  display: grid;
+  place-items: center;
+  width: 29px;
+  height: 29px;
+  color: #a5f3fc;
+  border-radius: 10px;
+  background: rgba(34, 211, 238, 0.12);
+}
+.image-options header div {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  flex: 1;
+}
+.image-options strong {
+  font-size: 12px;
+}
+.image-options small {
+  overflow: hidden;
+  color: #aeb8d0;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.image-options button {
+  border: 0;
+  color: #cbd5e1;
+  background: transparent;
+  cursor: pointer;
+}
+.image-options-close {
+  padding: 4px;
+}
+.image-options input,
+.image-options select {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 9px;
+  color: #eaf2ff;
+  outline: 0;
+  background: rgba(2, 6, 23, 0.48);
+  font: inherit;
+}
+.dimension-fields {
+  display: grid;
+  grid-template-columns: 1fr 12px 1fr;
+  align-items: end;
+  gap: 6px;
+}
+.dimension-fields label,
+.select-field {
+  display: grid;
+  gap: 5px;
+  color: #aeb8d0;
+  font-size: 9px;
+}
+.dimension-fields input,
+.select-field select {
+  padding: 7px;
+  font-size: 11px;
+}
+.dimension-fields span {
+  padding-bottom: 7px;
+  color: #8290ac;
+  text-align: center;
+}
+.select-field {
+  margin-top: 11px;
+}
+.check-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 11px;
+  color: #cbd5e1;
+  font-size: 10px;
+}
+.check-field input {
+  width: auto;
+  accent-color: #a78bfa;
+}
+.quality-field {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 7px;
+  color: #cbd5e1;
+  font-size: 10px;
+}
+.quality-field input {
+  grid-column: 1/-1;
+  accent-color: #67e8f9;
+}
+.quality-presets {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+}
+.quality-presets button {
+  flex: 1;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 8px;
+  font-size: 9px;
+}
+.image-options footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 15px;
+}
+.image-options footer button {
+  padding: 7px 10px;
+  border-radius: 9px;
+  font-size: 10px;
+}
+.image-options .apply-button {
+  color: #fff;
+  background: linear-gradient(135deg, #7c3aed, #06b6d4);
+}
+.crop-panel {
+  width: min(440px, calc(100vw - 20px));
+  overflow: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  border-radius: 28px;
+  color: #292b31;
+  background: rgba(255, 255, 255, 0.97);
+  box-shadow: 0 22px 55px rgba(15, 23, 42, 0.2);
+}
+.crop-header {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 52px;
+  border-bottom: 1px solid #e7e7e7;
+}
+.crop-header h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+.crop-close {
+  position: absolute;
+  left: 13px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  color: #555960;
+  background: #eff0f1;
+  cursor: pointer;
+}
+.crop-new-file {
+  position: absolute;
+  right: 14px;
+  padding: 7px 12px;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  background: #656872;
+  font-size: 11px;
+  font-weight: 650;
+  cursor: pointer;
+}
+.crop-new-file:hover {
+  background: #4e515a;
+}
+.crop-new-file:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.crop-stage {
+  position: relative;
+  height: 250px;
+  overflow: hidden;
+  background: #f6f7f7;
+  touch-action: none;
+}
+.crop-stage > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+}
+.crop-frame {
+  position: absolute;
+  z-index: 1;
+  min-width: 12px;
+  min-height: 12px;
+  border: 3px solid #f15a24;
+  cursor: move;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.42);
+  touch-action: none;
+}
+.crop-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.crop-grid-a {
+  border-right: 1px solid rgba(255, 255, 255, 0.58);
+  border-left: 1px solid rgba(255, 255, 255, 0.58);
+  left: 33.333%;
+  right: 33.333%;
+}
+.crop-grid-b {
+  border-top: 1px solid rgba(255, 255, 255, 0.58);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.58);
+  top: 33.333%;
+  bottom: 33.333%;
+}
+.crop-handle {
+  position: absolute;
+  z-index: 2;
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: #f15a24;
+  box-shadow: 0 1px 2px rgba(83, 27, 6, 0.28);
+}
+.crop-handle-n,
+.crop-handle-s {
+  left: 50%;
+  margin-left: -6.5px;
+  cursor: ns-resize;
+}
+.crop-handle-e,
+.crop-handle-w {
+  top: 50%;
+  margin-top: -6.5px;
+  cursor: ew-resize;
+}
+.crop-handle-n {
+  top: -8px;
+}
+.crop-handle-s {
+  bottom: -8px;
+}
+.crop-handle-e {
+  right: -8px;
+}
+.crop-handle-w {
+  left: -8px;
+}
+.crop-handle-ne {
+  top: -8px;
+  right: -8px;
+  cursor: nesw-resize;
+}
+.crop-handle-nw {
+  top: -8px;
+  left: -8px;
+  cursor: nwse-resize;
+}
+.crop-handle-se {
+  right: -8px;
+  bottom: -8px;
+  cursor: nwse-resize;
+}
+.crop-handle-sw {
+  bottom: -8px;
+  left: -8px;
+  cursor: nesw-resize;
+}
+.crop-controls {
+  padding: 16px 16px 14px;
+}
+.crop-label {
+  display: block;
+  margin: 0 0 9px 2px;
+  color: #5c5f64;
+  font-size: 12px;
+  font-weight: 600;
+}
+.crop-ratios {
+  display: flex;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #e9eaeb;
+}
+.crop-ratios button {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 2px;
+  border: 0;
+  border-right: 1px solid #c8c9cc;
+  color: #5b5e63;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.crop-ratios button:last-child {
+  border-right: 0;
+}
+.crop-ratios button.active {
+  color: #31343a;
+  background: #d0d1d3;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3);
+}
+.crop-dimensions {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  margin-top: 15px;
+}
+.crop-dimensions label {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  align-items: center;
+  gap: 5px;
+  color: #666a70;
+  font-size: 12px;
+  font-weight: 600;
+}
+.crop-dimensions input {
+  width: 96px;
+  height: 33px;
+  padding: 5px 8px;
+  border: 1px solid #dedfe1;
+  border-radius: 7px;
+  color: #36383c;
+  outline: none;
+  background: #fff;
+  font:
+    600 13px Inter,
+    sans-serif;
+}
+.crop-dimensions input:focus {
+  border-color: #f15a24;
+  box-shadow: 0 0 0 2px rgba(241, 90, 36, 0.13);
+}
+.crop-dimensions > span {
+  padding-bottom: 8px;
+  color: #777a80;
+  font-size: 12px;
+}
+.crop-footer {
+  display: flex;
+  justify-content: space-between;
+  padding: 13px 16px 16px;
+  border-top: 1px solid #e4e5e6;
+}
+.crop-footer button {
+  min-width: 70px;
+  padding: 8px 13px;
+  border: 0;
+  border-radius: 8px;
+  color: #51545a;
+  background: #eaebec;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.crop-footer .crop-apply {
+  color: #fff;
+  background: #f15a24;
+}
+.crop-footer .crop-apply:disabled {
+  cursor: default;
+  opacity: 0.45;
 }

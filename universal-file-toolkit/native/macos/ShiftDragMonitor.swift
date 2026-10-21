@@ -1,12 +1,14 @@
 import ApplicationServices
+import AppKit
 import Foundation
 
-/// A minimal, event-driven feasibility helper. It observes candidate gestures only.
-/// It does not inspect Finder drag payloads, read file URLs, synthesize input, or use private APIs.
+/// A minimal, event-driven helper. It checks only the public pasteboard type declaration
+/// to distinguish Finder file drags from ordinary modifier drags; it never reads file URLs.
 final class ShiftDragMonitor {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var gestureActive = false
+    private var activeModifier: String?
 
     func start() {
         let promptOption = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
@@ -57,14 +59,47 @@ final class ShiftDragMonitor {
     }
 
     private func handle(type: CGEventType, event: CGEvent) {
-        let shiftHeld = event.flags.contains(.maskShift)
-        if type == .leftMouseDragged && shiftHeld && !gestureActive {
-            gestureActive = true
-            emit(["type": "shift-drag-candidate"])
+        if type == .leftMouseDown && !gestureActive {
+            let location = event.location
+            emit(["type": "outside-click", "x": location.x, "y": location.y])
         }
-        if type == .leftMouseUp || (type == .flagsChanged && !shiftHeld && gestureActive) {
+        let modifier = dragModifier(for: event.flags)
+        if type == .leftMouseDragged || (type == .flagsChanged && gestureActive) {
+            if type == .leftMouseDragged && !gestureActive && !hasFileDragPasteboard() {
+                return
+            }
+            guard let modifier else {
+                if gestureActive { emit(["type": "gesture-ended"]) }
+                gestureActive = false
+                activeModifier = nil
+                return
+            }
+            if !gestureActive {
+                gestureActive = true
+                activeModifier = modifier
+                emit(["type": "modifier-drag-candidate", "modifier": modifier])
+            } else if activeModifier != modifier {
+                activeModifier = modifier
+                emit(["type": "modifier-changed", "modifier": modifier])
+            }
+        }
+        if type == .leftMouseUp {
             if gestureActive { emit(["type": "gesture-ended"]) }
             gestureActive = false
+            activeModifier = nil
+        }
+    }
+
+    private func dragModifier(for flags: CGEventFlags) -> String? {
+        if flags.contains(.maskCommand) { return "command" }
+        if flags.contains(.maskShift) { return "shift" }
+        return nil
+    }
+
+    private func hasFileDragPasteboard() -> Bool {
+        let types = NSPasteboard(name: .drag).types ?? []
+        return types.contains(.fileURL) || types.contains { type in
+            type.rawValue == "NSFilenamesPboardType"
         }
     }
 

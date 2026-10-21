@@ -2,16 +2,12 @@ import { useRef, type DragEvent, type PropsWithChildren } from 'react'
 
 interface DropZoneProps extends PropsWithChildren {
   isDragging: boolean
-  hasFile: boolean
-  onClear: () => void
   onDismiss?: () => void
   dragHandlers: Record<string, (event: DragEvent<HTMLElement>) => void>
 }
 export default function DropZone({
   children,
   isDragging,
-  hasFile,
-  onClear,
   onDismiss,
   dragHandlers
 }: DropZoneProps): React.JSX.Element {
@@ -30,25 +26,13 @@ export default function DropZone({
   }
   return (
     <div
-      className={`drop-zone ${isDragging ? 'is-dragging' : ''} ${hasFile ? 'has-file' : ''}`}
+      className={`drop-zone ${isDragging ? 'is-dragging' : ''}`}
       {...dragHandlers}
       onClick={(event) => {
         if (event.target === event.currentTarget) onDismiss?.()
       }}
     >
       <input ref={inputRef} className="file-input" type="file" onChange={selectFile} />
-      {hasFile && (
-        <button
-          className="clear-button"
-          onClick={(event) => {
-            event.stopPropagation()
-            onClear()
-          }}
-        >
-          New file
-        </button>
-      )}
-      {isDragging && <div className="drag-overlay">Release to add this file</div>}
       {children}
     </div>
   )

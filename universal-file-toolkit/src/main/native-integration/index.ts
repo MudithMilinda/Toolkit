@@ -19,7 +19,11 @@ class DocumentedIntegration implements NativeIntegration {
 }
 
 type HelperMessage = {
-  type: 'shift-drag-candidate' | 'gesture-ended' | 'status'
+  type:
+    'modifier-drag-candidate' | 'modifier-changed' | 'outside-click' | 'gesture-ended' | 'status'
+  modifier?: 'shift' | 'command'
+  x?: number
+  y?: number
   accessibility?: boolean
   inputMonitoring?: boolean
   eventTap?: boolean
@@ -105,7 +109,16 @@ class MacShiftDragIntegration implements NativeIntegration {
             }
       callbacks.onStatus?.(this.currentStatus)
     }
-    if (message.type === 'shift-drag-candidate') callbacks.onShiftDragCandidate()
+    if (message.type === 'modifier-drag-candidate' && message.modifier)
+      callbacks.onModifierDragCandidate(message.modifier)
+    if (message.type === 'modifier-changed' && message.modifier)
+      callbacks.onModifierChanged(message.modifier)
+    if (
+      message.type === 'outside-click' &&
+      typeof message.x === 'number' &&
+      typeof message.y === 'number'
+    )
+      callbacks.onOutsideClick({ x: message.x, y: message.y })
     if (message.type === 'gesture-ended') callbacks.onGestureEnded()
   }
 }

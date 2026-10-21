@@ -4,16 +4,42 @@ declare global {
       closeRadialMenu: () => Promise<void>
       notifyDropReceived: () => void
       getPathForFile: (file: File) => string
+      getImagePreview: (inputPath: string) => Promise<string>
       convertImage: (payload: {
         inputPath: string
-        targetFormat: 'png' | 'jpg' | 'webp'
+        targetFormat: 'png' | 'jpg' | 'webp' | 'pdf' | 'heic' | 'tiff' | 'avif' | 'bmp'
       }) => Promise<{
         outputPath: string
         originalSize: number
         outputSize: number
         savedPercent: number
       }>
+      resizeImage: (payload: {
+        inputPath: string
+        operation: 'resize'
+        width?: number
+        height?: number
+        fit: 'inside' | 'cover' | 'fill'
+        withoutEnlargement: boolean
+      }) => Promise<{ outputPath: string; savedPercent: number }>
+      compressImage: (payload: {
+        inputPath: string
+        operation: 'compress'
+        quality: number
+      }) => Promise<{
+        outputPath: string
+        savedPercent: number
+      }>
+      cropImage: (payload: {
+        inputPath: string
+        operation: 'crop'
+        left: number
+        top: number
+        width: number
+        height: number
+      }) => Promise<{ outputPath: string }>
       onRadialMenuOpened: (listener: () => void) => () => void
+      onRadialMenuModifier: (listener: (modifier: 'shift' | 'command') => void) => () => void
       onSettingsRequested: (listener: () => void) => () => void
     }
   }
