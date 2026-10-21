@@ -37,7 +37,7 @@ export class ConversionManager {
   }
 
   compressImage(request: ImageCompressionRequest): Promise<ConversionResult> {
-    const key = `${resolve(request.inputPath)}:compress:${request.quality}`
+    const key = `${resolve(request.inputPath)}:compress:${request.quality}:${request.maxDimension ?? ''}`
     return this.startJob(key, () => this.performCompression(request))
   }
   cropImage(request: ImageCropRequest): Promise<ConversionResult> {
@@ -124,7 +124,7 @@ export class ConversionManager {
     const startedAt = Date.now()
     const temporaryPath = await this.outputManager.createTemporaryPath(inputPath)
     try {
-      await this.imageConverter.compress(inputPath, temporaryPath, targetFormat, request.quality)
+      await this.imageConverter.compress(inputPath, temporaryPath, targetFormat, request)
       const outputPath = await this.outputManager.publishTemporaryFile(
         temporaryPath,
         inputPath,

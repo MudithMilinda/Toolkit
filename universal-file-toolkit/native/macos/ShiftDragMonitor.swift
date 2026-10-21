@@ -9,9 +9,9 @@ final class ShiftDragMonitor {
     private var runLoopSource: CFRunLoopSource?
     private var gestureActive = false
     private var activeModifier: String?
-    // Tab is not represented in CGEventFlags, unlike Shift. Track it
-    // separately so a Finder drag can use Tab as the image-tools (Crop) trigger.
-    private var tabKeyDown = false
+    // Q is not represented in CGEventFlags, unlike Shift. Track it separately
+    // so a Finder drag can use Q as the image-tools (Crop) trigger.
+    private var toolKeyDown = false
 
     func start() {
         let promptOption = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
@@ -65,10 +65,10 @@ final class ShiftDragMonitor {
 
     private func handle(type: CGEventType, event: CGEvent) {
         if type == .keyDown || type == .keyUp {
-            // macOS virtual key code for Tab. Keeping this at the event-tap layer
+            // macOS virtual key code for Q. Keeping this at the event-tap layer
             // means it also works while Finder owns the active drag.
-            guard event.getIntegerValueField(.keyboardEventKeycode) == 48 else { return }
-            tabKeyDown = type == .keyDown
+            guard event.getIntegerValueField(.keyboardEventKeycode) == 12 else { return }
+            toolKeyDown = type == .keyDown
 
             guard gestureActive else { return }
             let modifier = dragModifier(for: event.flags)
@@ -117,8 +117,8 @@ final class ShiftDragMonitor {
 
     private func dragModifier(for flags: CGEventFlags) -> String? {
         // The renderer already treats "command" as the image-tools menu, so
-        // Tab deliberately maps to that same mode without widening the IPC API.
-        if tabKeyDown { return "command" }
+        // Q deliberately maps to that same mode without widening the IPC API.
+        if toolKeyDown { return "command" }
         if flags.contains(.maskShift) { return "shift" }
         return nil
     }

@@ -39,7 +39,6 @@ function App(): React.JSX.Element {
       if (
         !['png', 'jpg', 'webp', 'pdf', 'heic', 'tiff', 'avif', 'bmp'].includes(nextOperation.id)
       ) {
-        setNotice(`${nextOperation.label} editor is coming in the next image milestone.`)
         return
       }
       const inputPath = window.api.getPathForFile(selectedFile)
@@ -76,7 +75,9 @@ function App(): React.JSX.Element {
   const runEdit = useCallback(
     (
       mode: 'resize' | 'compress',
-      payload: Omit<Parameters<typeof window.api.resizeImage>[0], 'inputPath'> | number
+      payload:
+        | Omit<Parameters<typeof window.api.resizeImage>[0], 'inputPath'>
+        | Omit<Parameters<typeof window.api.compressImage>[0], 'inputPath' | 'operation'>
     ) => {
       if (!file) return
       const inputPath = window.api.getPathForFile(file)
@@ -93,7 +94,10 @@ function App(): React.JSX.Element {
           : window.api.compressImage({
               inputPath,
               operation: 'compress',
-              quality: payload as number
+              ...(payload as Omit<
+                Parameters<typeof window.api.compressImage>[0],
+                'inputPath' | 'operation'
+              >)
             })
       void job
         .then((result) => {
@@ -169,10 +173,10 @@ function App(): React.JSX.Element {
             {(optionsMode === 'resize' || optionsMode === 'compress') && file && (
               <ImageOptionsPanel
                 mode={optionsMode}
-                fileName={file.name}
+                file={file}
                 onCancel={() => setOptionsMode(null)}
                 onResize={(payload) => runEdit('resize', { ...payload, operation: 'resize' })}
-                onCompress={(quality) => runEdit('compress', quality)}
+                onCompress={(payload) => runEdit('compress', payload)}
               />
             )}
             {optionsMode === 'crop' && file && !isClosing && (

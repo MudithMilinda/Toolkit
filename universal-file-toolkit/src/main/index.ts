@@ -87,7 +87,12 @@ function isImageCompressionRequest(value: unknown): value is ImageCompressionReq
     typeof candidate.quality === 'number' &&
     Number.isInteger(candidate.quality) &&
     candidate.quality >= 1 &&
-    candidate.quality <= 100
+    candidate.quality <= 100 &&
+    (candidate.maxDimension === undefined ||
+      (typeof candidate.maxDimension === 'number' &&
+        Number.isInteger(candidate.maxDimension) &&
+        candidate.maxDimension >= 1 &&
+        candidate.maxDimension <= 16_384))
   )
 }
 function isImageCropRequest(value: unknown): value is ImageCropRequest {

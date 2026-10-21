@@ -30,6 +30,8 @@ export interface ImageCompressionRequest {
   inputPath: string
   operation: 'compress'
   quality: number
+  /** Longest output edge, preserving the original aspect ratio. */
+  maxDimension?: number
 }
 export interface ImageCropRequest {
   inputPath: string

@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process'
 import { platform } from 'node:process'
 import { promisify } from 'node:util'
 import type { ImageConversionOptions, ImageTargetFormat } from '../types'
+import type { ImageCompressionRequest } from '../types'
 
 const supportedInputFormats = new Set(['jpeg', 'png', 'webp', 'avif', 'tiff', 'gif', 'heif'])
 const execFileAsync = promisify(execFile)
@@ -93,20 +94,28 @@ export class ImageConverter {
     inputPath: string,
     outputPath: string,
     targetFormat: ImageTargetFormat,
-    quality: number
+    options: Pick<ImageCompressionRequest, 'quality' | 'maxDimension'>
   ): Promise<void> {
     let pipeline = sharp(inputPath, { animated: false, failOn: 'warning' }).rotate()
+    if (options.maxDimension) {
+      pipeline = pipeline.resize({
+        width: options.maxDimension,
+        height: options.maxDimension,
+        fit: 'inside',
+        withoutEnlargement: true
+      })
+    }
     if (targetFormat === 'jpg') {
       pipeline = pipeline.flatten({ background: { r: 255, g: 255, b: 255 } })
-      await pipeline.jpeg({ quality, mozjpeg: true }).toFile(outputPath)
+      await pipeline.jpeg({ quality: options.quality, mozjpeg: true }).toFile(outputPath)
       return
     }
     if (targetFormat === 'webp') {
-      await pipeline.webp({ quality }).toFile(outputPath)
+      await pipeline.webp({ quality: options.quality }).toFile(outputPath)
       return
     }
     await pipeline
-      .png({ compressionLevel: quality < 70 ? 9 : quality < 90 ? 7 : 5 })
+      .png({ compressionLevel: options.quality < 70 ? 9 : options.quality < 90 ? 7 : 5 })
       .toFile(outputPath)
   }
 

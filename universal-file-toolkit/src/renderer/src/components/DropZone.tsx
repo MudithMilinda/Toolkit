@@ -29,7 +29,13 @@ export default function DropZone({
       className={`drop-zone ${isDragging ? 'is-dragging' : ''}`}
       {...dragHandlers}
       onClick={(event) => {
-        if (event.target === event.currentTarget) onDismiss?.()
+        // The full window is the drop zone, but its transparent area is covered
+        // by layout wrappers. Treat clicks outside an active panel as dismissal.
+        const target = event.target
+        const clickedPanel =
+          target instanceof Element &&
+          target.closest('.radial-menu, .image-options, .crop-panel, .compress-panel') !== null
+        if (!clickedPanel) onDismiss?.()
       }}
     >
       <input ref={inputRef} className="file-input" type="file" onChange={selectFile} />

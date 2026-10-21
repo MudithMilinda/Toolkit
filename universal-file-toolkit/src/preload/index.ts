@@ -29,7 +29,12 @@ const api = Object.freeze({
       outputPath: string
       savedPercent: number
     }>,
-  compressImage: (payload: { inputPath: string; operation: 'compress'; quality: number }) =>
+  compressImage: (payload: {
+    inputPath: string
+    operation: 'compress'
+    quality: number
+    maxDimension?: number
+  }) =>
     ipcRenderer.invoke('conversion:image-compress', payload) as Promise<{
       outputPath: string
       savedPercent: number

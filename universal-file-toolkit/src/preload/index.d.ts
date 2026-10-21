@@ -26,6 +26,7 @@ declare global {
         inputPath: string
         operation: 'compress'
         quality: number
+        maxDimension?: number
       }) => Promise<{
         outputPath: string
         savedPercent: number

@@ -37,14 +37,13 @@ export default function RadialMenu({
   }, [activeModifier])
   useEffect(() => {
     const updateModifier = (event: KeyboardEvent): void => {
-      if (event.key === 'Tab') {
+      if (event.key.toLowerCase() === 'q') {
         event.preventDefault()
         setModifier('command')
-      }
-      else if (event.shiftKey || event.key === 'Shift') setModifier('shift')
+      } else if (event.shiftKey || event.key === 'Shift') setModifier('shift')
     }
     const resetModifier = (event: KeyboardEvent): void => {
-      if (event.key === 'Tab' || event.key === 'Shift') setModifier('shift')
+      if (event.key.toLowerCase() === 'q' || event.key === 'Shift') setModifier('shift')
     }
     window.addEventListener('keydown', updateModifier)
     window.addEventListener('keyup', resetModifier)
