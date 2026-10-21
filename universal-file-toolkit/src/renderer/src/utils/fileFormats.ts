@@ -64,10 +64,8 @@ const imageToolOperations = entries([
   ['compress', 'Compress'],
   ['metadata', 'Metadata'],
   ['edit', 'Edit'],
-  ['annotate', 'Annotate'],
-  ['add-background', 'Add BG'],
   ['crop', 'Crop'],
-  ['redact', 'Redact']
+  ['send-email', 'Send Email']
 ])
 
 export const getFileToolOperations = (filename: string): FileOperation[] =>

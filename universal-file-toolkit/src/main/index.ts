@@ -6,12 +6,15 @@ import {
   Menu,
   Notification,
   screen,
+  shell,
   Tray
 } from 'electron'
-import { join } from 'path'
+import { execFile } from 'node:child_process'
+import { basename, join } from 'path'
 import { readFile, stat } from 'node:fs/promises'
 import { isAbsolute, resolve } from 'node:path'
 import sharp from 'sharp'
+import { promisify } from 'node:util'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { createNativeIntegration } from './native-integration'
@@ -19,7 +22,9 @@ import { ConversionManager } from './services/conversion/ConversionManager'
 import type {
   ImageCompressionRequest,
   ImageCropRequest,
+  ImageEditRequest,
   ImageConversionRequest,
+  ImagesToPdfRequest,
   ImageResizeRequest
 } from './services/conversion/types'
 
@@ -27,10 +32,11 @@ let radialWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 const nativeIntegration = createNativeIntegration()
 const conversionManager = new ConversionManager()
+const execFileAsync = promisify(execFile)
 let nativeDismissTimer: ReturnType<typeof setTimeout> | null = null
 let nativeDragCandidateVisible = false
 // The crop editor needs room for a comfortably sized preview and its controls.
-const MENU_SIZE = 560
+const MENU_SIZE = 660
 const shortcuts =
   process.platform === 'darwin'
     ? ['CommandOrControl+Shift+Space', 'Control+Shift+Space', 'CommandOrControl+Alt+Space']
@@ -47,6 +53,45 @@ function isImageConversionRequest(value: unknown): value is ImageConversionReque
       String(candidate.targetFormat)
     ) &&
     (candidate.options === undefined || typeof candidate.options === 'object')
+  )
+}
+
+async function composeEmailWithAttachment(inputPath: string): Promise<void> {
+  const attachmentName = basename(inputPath)
+  if (process.platform !== 'darwin') {
+    await shell.openExternal(
+      `mailto:?subject=${encodeURIComponent(`Sharing ${attachmentName}`)}&body=${encodeURIComponent(`Please find ${attachmentName} attached.`)}`
+    )
+    return
+  }
+  const script = `on run argv
+set attachmentPath to item 1 of argv
+set attachmentName to item 2 of argv
+tell application "Mail"
+  set newMessage to make new outgoing message with properties {visible:true, subject:("Sharing " & attachmentName), content:("Please find " & attachmentName & " attached.")}
+  tell newMessage
+    make new attachment with properties {file name:POSIX file attachmentPath} at after the last paragraph
+  end tell
+  activate
+end tell
+end run`
+  await execFileAsync('osascript', ['-e', script, '--', inputPath, attachmentName])
+}
+
+function isImagesToPdfRequest(value: unknown): value is ImagesToPdfRequest {
+  if (!value || typeof value !== 'object') return false
+  const inputPaths = (value as Record<string, unknown>).inputPaths
+  return (
+    Array.isArray(inputPaths) &&
+    inputPaths.length >= 1 &&
+    inputPaths.length <= 100 &&
+    inputPaths.every(
+      (inputPath) =>
+        typeof inputPath === 'string' &&
+        inputPath.length > 0 &&
+        inputPath.length <= 16_384 &&
+        !inputPath.includes('\0')
+    )
   )
 }
 
@@ -109,6 +154,30 @@ function isImageCropRequest(value: unknown): value is ImageCropRequest {
     ) &&
     (candidate.width as number) > 0 &&
     (candidate.height as number) > 0
+  )
+}
+function isImageEditRequest(value: unknown): value is ImageEditRequest {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return (
+    hasSafeInputPath(candidate) &&
+    candidate.operation === 'edit' &&
+    [
+      'rotation',
+      'exposure',
+      'brightness',
+      'contrast',
+      'highlights',
+      'shadows',
+      'whites',
+      'blacks',
+      'saturation',
+      'vibrance',
+      'hue',
+      'temperature',
+      'tint',
+      'gamma'
+    ].every((key) => typeof candidate[key] === 'number' && Number.isFinite(candidate[key]))
   )
 }
 
@@ -261,9 +330,20 @@ app.whenReady().then(() => {
     nativeDragCandidateVisible = false
     radialWindow?.hide()
   })
+  ipcMain.handle('email:compose', async (_, inputPathValue: unknown) => {
+    if (typeof inputPathValue !== 'string' || !isAbsolute(inputPathValue))
+      throw new Error('Invalid attachment path.')
+    const inputPath = resolve(inputPathValue)
+    const details = await stat(inputPath)
+    if (!details.isFile()) throw new Error('The selected attachment is not a regular file.')
+    await composeEmailWithAttachment(inputPath)
+  })
   ipcMain.on('radial-menu:drop-received', () => {
     if (nativeDismissTimer) clearTimeout(nativeDismissTimer)
     nativeDragCandidateVisible = false
+    // The menu was deliberately shown inactive while Finder owned the drag.
+    // Once the file is dropped, editor inputs (such as Text) must receive keys.
+    radialWindow?.focus()
   })
   ipcMain.handle('conversion:image', async (_, payload: unknown) => {
     if (!isImageConversionRequest(payload)) throw new Error('Invalid image conversion request.')
@@ -272,6 +352,17 @@ app.whenReady().then(() => {
       new Notification({
         title: 'Conversion Complete',
         body: `${result.inputPath.split(/[\\/]/).pop()} converted to ${result.outputPath.split(/[\\/]/).pop()}.`
+      }).show()
+    }
+    return result
+  })
+  ipcMain.handle('conversion:images-to-pdf', async (_, payload: unknown) => {
+    if (!isImagesToPdfRequest(payload)) throw new Error('Invalid PDF conversion request.')
+    const result = await conversionManager.convertImagesToPdf(payload)
+    if (Notification.isSupported()) {
+      new Notification({
+        title: 'PDF Created',
+        body: `${payload.inputPaths.length} image${payload.inputPaths.length === 1 ? '' : 's'} saved as ${result.outputPath.split(/[\\/]/).pop()}.`
       }).show()
     }
     return result
@@ -288,6 +379,10 @@ app.whenReady().then(() => {
     if (!isImageCropRequest(payload)) throw new Error('Invalid image crop request.')
     return conversionManager.cropImage(payload)
   })
+  ipcMain.handle('conversion:image-edit', async (_, payload: unknown) => {
+    if (!isImageEditRequest(payload)) throw new Error('Invalid image edit request.')
+    return conversionManager.editImage(payload)
+  })
   ipcMain.handle('image:preview', async (_, inputPath: unknown) => {
     if (typeof inputPath !== 'string' || !isAbsolute(inputPath))
       throw new Error('Invalid preview path.')
@@ -300,6 +395,25 @@ app.whenReady().then(() => {
     const bytes = await readFile(path)
     const mime = metadata.format === 'jpeg' ? 'image/jpeg' : `image/${metadata.format}`
     return `data:${mime};base64,${bytes.toString('base64')}`
+  })
+  ipcMain.handle('image:metadata', async (_, inputPath: unknown) => {
+    if (typeof inputPath !== 'string' || !isAbsolute(inputPath))
+      throw new Error('Invalid metadata path.')
+    const metadata = await sharp(resolve(inputPath), { failOn: 'warning' }).metadata()
+    return Object.entries({
+      Format: metadata.format?.toUpperCase(),
+      Width: metadata.width,
+      Height: metadata.height,
+      'Color space': metadata.space,
+      'Bits per sample': metadata.depth,
+      Orientation: metadata.orientation,
+      Density: metadata.density,
+      'Has alpha': metadata.hasAlpha ? 'Yes' : 'No',
+      'ICC profile': metadata.icc ? 'Present' : undefined,
+      EXIF: metadata.exif ? 'Present' : undefined
+    })
+      .filter(([, value]) => value !== undefined && value !== null)
+      .map(([key, value]) => ({ key, value: String(value) }))
   })
 
   app.on('activate', function () {

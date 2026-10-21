@@ -5,6 +5,8 @@ import DropZone from './components/DropZone'
 import RadialMenu from './components/RadialMenu/RadialMenu'
 import ImageOptionsPanel from './components/ImageOptionsPanel'
 import ImageCropPanel from './components/ImageCropPanel'
+import ImageEditPanel from './components/ImageEditPanel'
+import ImageMetadataPanel from './components/ImageMetadataPanel'
 import { useFileDrop } from './hooks/useFileDrop'
 import {
   getFileToolOperations,
@@ -13,13 +15,15 @@ import {
 } from './utils/fileFormats'
 
 function App(): React.JSX.Element {
-  const { file, isDragging, dragHandlers, loadFile, reset, clearDragging } = useFileDrop()
+  const { file, files, isDragging, dragHandlers, loadFile, reset, clearDragging } = useFileDrop()
   const [operation, setOperation] = useState<FileOperation | null>(null)
   const [isClosing, setIsClosing] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
   const [dragModifier, setDragModifier] = useState<'shift' | 'command'>('shift')
-  const [optionsMode, setOptionsMode] = useState<'resize' | 'compress' | 'crop' | null>(null)
+  const [optionsMode, setOptionsMode] = useState<
+    'resize' | 'compress' | 'crop' | 'edit' | 'metadata' | null
+  >(null)
   const handleOperation = useCallback(
     (nextOperation: FileOperation, selectedFile: File | null = file) => {
       if (!selectedFile) {
@@ -28,10 +32,53 @@ function App(): React.JSX.Element {
       }
       clearDragging()
       setOperation(nextOperation)
+      if (nextOperation.id === 'send-email') {
+        const inputPath = window.api.getPathForFile(selectedFile)
+        if (!inputPath) {
+          setNotice('The selected file path could not be read. Please try again.')
+          return
+        }
+        setNotice(`Opening an email for ${selectedFile.name}…`)
+        void window.api
+          .composeEmail(inputPath)
+          .then(() => setNotice(`Email composer opened with ${selectedFile.name} attached.`))
+          .catch((error: unknown) =>
+            setNotice(error instanceof Error ? error.message : 'Unable to open an email composer.')
+          )
+        return
+      }
+      if (nextOperation.id === 'pdf' && selectedFile === file && files.length > 1) {
+        const inputPaths = files
+          .map((droppedFile) => window.api.getPathForFile(droppedFile))
+          .filter((inputPath): inputPath is string => Boolean(inputPath))
+        if (inputPaths.length !== files.length) {
+          setNotice('One or more dropped file paths could not be read. Please try again.')
+          return
+        }
+        setIsProcessing(true)
+        setIsClosing(true)
+        setNotice(`Creating one PDF with ${inputPaths.length} pages…`)
+        window.setTimeout(() => void window.api.closeRadialMenu(), 220)
+        void window.api
+          .convertImagesToPdf({ inputPaths })
+          .then((result) =>
+            setNotice(
+              `PDF created — ${result.outputPath.split(/[\\/]/).pop()} (${inputPaths.length} pages).`
+            )
+          )
+          .catch((error: unknown) => {
+            setIsClosing(false)
+            setNotice(error instanceof Error ? error.message : 'PDF creation failed.')
+          })
+          .finally(() => setIsProcessing(false))
+        return
+      }
       if (
         nextOperation.id === 'resize' ||
         nextOperation.id === 'compress' ||
-        nextOperation.id === 'crop'
+        nextOperation.id === 'crop' ||
+        nextOperation.id === 'edit' ||
+        nextOperation.id === 'metadata'
       ) {
         setOptionsMode(nextOperation.id)
         return
@@ -70,7 +117,7 @@ function App(): React.JSX.Element {
         })
         .finally(() => setIsProcessing(false))
     },
-    [clearDragging, file]
+    [clearDragging, file, files]
   )
   const runEdit = useCallback(
     (
@@ -161,10 +208,42 @@ function App(): React.JSX.Element {
                   isDragging={isDragging}
                   selectedOperation={operation}
                   onSelect={isProcessing ? () => undefined : handleOperation}
-                  onDirectFileDrop={(droppedFile, nextOperation) => {
+                  onDirectFileDrop={(droppedFiles, nextOperation) => {
                     window.api.notifyDropReceived()
-                    loadFile(droppedFile)
-                    handleOperation(nextOperation, droppedFile)
+                    loadFile(droppedFiles[0])
+                    if (nextOperation.id === 'pdf' && droppedFiles.length > 1) {
+                      const inputPaths = droppedFiles
+                        .map((droppedFile) => window.api.getPathForFile(droppedFile))
+                        .filter((inputPath): inputPath is string => Boolean(inputPath))
+                      if (inputPaths.length !== droppedFiles.length) {
+                        setNotice(
+                          'One or more dropped file paths could not be read. Please try again.'
+                        )
+                        return
+                      }
+                      clearDragging()
+                      setOperation(nextOperation)
+                      setIsProcessing(true)
+                      setIsClosing(true)
+                      setNotice(`Creating one PDF with ${inputPaths.length} pages…`)
+                      window.setTimeout(() => void window.api.closeRadialMenu(), 220)
+                      void window.api
+                        .convertImagesToPdf({ inputPaths })
+                        .then((result) =>
+                          setNotice(
+                            `PDF created — ${result.outputPath.split(/[\\/]/).pop()} (${inputPaths.length} pages).`
+                          )
+                        )
+                        .catch((error: unknown) => {
+                          setIsClosing(false)
+                          setNotice(error instanceof Error ? error.message : 'PDF creation failed.')
+                        })
+                        .finally(() => setIsProcessing(false))
+                      return
+                    }
+                    droppedFiles.forEach((droppedFile) =>
+                      handleOperation(nextOperation, droppedFile)
+                    )
                   }}
                   onDismiss={dismiss}
                 />
@@ -206,6 +285,31 @@ function App(): React.JSX.Element {
                     .finally(() => setIsProcessing(false))
                 }}
               />
+            )}
+            {optionsMode === 'edit' && file && !isClosing && (
+              <ImageEditPanel
+                file={file}
+                onCancel={() => setOptionsMode(null)}
+                onSave={(edits) => {
+                  const inputPath = window.api.getPathForFile(file)
+                  setIsProcessing(true)
+                  setNotice(`Editing ${file.name}…`)
+                  void window.api
+                    .editImage({ inputPath, operation: 'edit', ...edits })
+                    .then((result) => {
+                      setNotice(`Saved edited copy — ${result.outputPath.split(/[\\/]/).pop()}.`)
+                      setIsClosing(true)
+                      window.setTimeout(() => void window.api.closeRadialMenu(), 240)
+                    })
+                    .catch((error: unknown) =>
+                      setNotice(error instanceof Error ? error.message : 'Edit failed.')
+                    )
+                    .finally(() => setIsProcessing(false))
+                }}
+              />
+            )}
+            {optionsMode === 'metadata' && file && !isClosing && (
+              <ImageMetadataPanel file={file} onCancel={() => setOptionsMode(null)} />
             )}
           </AnimatePresence>
         </DropZone>

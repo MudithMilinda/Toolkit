@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process'
 import { platform } from 'node:process'
 import { promisify } from 'node:util'
 import type { ImageConversionOptions, ImageTargetFormat } from '../types'
-import type { ImageCompressionRequest } from '../types'
+import type { ImageCompressionRequest, ImageEditRequest } from '../types'
 
 const supportedInputFormats = new Set(['jpeg', 'png', 'webp', 'avif', 'tiff', 'gif', 'heif'])
 const execFileAsync = promisify(execFile)
@@ -59,6 +59,23 @@ export class ImageConverter {
       return
     }
     await pipeline.png({ compressionLevel: 9, adaptiveFiltering: true }).toFile(outputPath)
+  }
+
+  async convertToPdf(inputPaths: string[], outputPath: string): Promise<void> {
+    const pages = await Promise.all(
+      inputPaths.map(async (inputPath) => {
+        const { data: jpeg, info } = await sharp(inputPath, {
+          animated: false,
+          failOn: 'warning'
+        })
+          .rotate()
+          .flatten({ background: 'white' })
+          .jpeg({ quality: 90, mozjpeg: true })
+          .toBuffer({ resolveWithObject: true })
+        return { jpeg, width: info.width, height: info.height }
+      })
+    )
+    await this.writePdfPages(pages, outputPath)
   }
 
   async resize(
@@ -132,6 +149,39 @@ export class ImageConverter {
     } else if (targetFormat === 'webp') await pipeline.webp({ quality: 85 }).toFile(outputPath)
     else await pipeline.png({ compressionLevel: 9 }).toFile(outputPath)
   }
+  async edit(
+    inputPath: string,
+    outputPath: string,
+    targetFormat: ImageTargetFormat,
+    options: ImageEditRequest
+  ): Promise<void> {
+    const clamp = (value: number): number => Math.max(0, Math.min(255, value))
+    const tonalOffset = options.brightness + options.whites * 0.35 + options.blacks * 0.2
+    const tonalGamma = Math.max(
+      0.1,
+      1 + (options.gamma - options.shadows * 0.22 + options.highlights * 0.16) / 100
+    )
+    let pipeline = sharp(inputPath, { animated: false, failOn: 'warning' })
+      .rotate(options.rotation)
+      .linear(2 ** options.exposure * (1 + options.contrast / 100), tonalOffset)
+      .modulate({
+        saturation: Math.max(0, 1 + (options.saturation + options.vibrance * 0.55) / 100),
+        hue: options.hue
+      })
+    if (options.temperature || options.tint)
+      pipeline = pipeline.tint({
+        r: clamp(255 + options.temperature),
+        g: clamp(255 + options.tint),
+        b: clamp(255 - options.temperature)
+      })
+    if (options.gamma || options.shadows || options.highlights)
+      pipeline = pipeline.gamma(tonalGamma)
+    if (targetFormat === 'jpg') {
+      pipeline = pipeline.flatten({ background: 'white' })
+      await pipeline.jpeg({ quality: 90, mozjpeg: true }).toFile(outputPath)
+    } else if (targetFormat === 'webp') await pipeline.webp({ quality: 85 }).toFile(outputPath)
+    else await pipeline.png({ compressionLevel: 9 }).toFile(outputPath)
+  }
 
   supportsOutput(target: ImageTargetFormat): boolean {
     const formats = sharp.format as unknown as Record<string, { output?: { file?: boolean } }>
@@ -187,26 +237,44 @@ export class ImageConverter {
       .flatten({ background: 'white' })
       .jpeg({ quality: 90, mozjpeg: true })
       .toBuffer({ resolveWithObject: true })
-    const content = Buffer.from(`q\n${info.width} 0 0 ${info.height} 0 0 cm\n/Im0 Do\nQ\n`)
-    const objects = [
+    await this.writePdfPages([{ jpeg, width: info.width, height: info.height }], outputPath)
+  }
+
+  private async writePdfPages(
+    pages: Array<{ jpeg: Buffer; width: number; height: number }>,
+    outputPath: string
+  ): Promise<void> {
+    if (!pages.length) throw new Error('Select at least one image to create a PDF.')
+    const pageObjectNumbers = pages.map((_, index) => 3 + index * 3)
+    const objects: Buffer[] = [
       Buffer.from('<< /Type /Catalog /Pages 2 0 R >>'),
-      Buffer.from('<< /Type /Pages /Kids [3 0 R] /Count 1 >>'),
       Buffer.from(
-        `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${info.width} ${info.height}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>`
-      ),
-      Buffer.concat([
-        Buffer.from(
-          `<< /Type /XObject /Subtype /Image /Width ${info.width} /Height ${info.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`
-        ),
-        jpeg,
-        Buffer.from('\nendstream')
-      ]),
-      Buffer.concat([
-        Buffer.from(`<< /Length ${content.length} >>\nstream\n`),
-        content,
-        Buffer.from('endstream')
-      ])
+        `<< /Type /Pages /Kids [${pageObjectNumbers.map((number) => `${number} 0 R`).join(' ')}] /Count ${pages.length} >>`
+      )
     ]
+    for (const [index, page] of pages.entries()) {
+      const pageObject = pageObjectNumbers[index]
+      const imageObject = pageObject + 1
+      const contentObject = pageObject + 2
+      const content = Buffer.from(`q\n${page.width} 0 0 ${page.height} 0 0 cm\n/Im0 Do\nQ\n`)
+      objects.push(
+        Buffer.from(
+          `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${page.width} ${page.height}] /Resources << /XObject << /Im0 ${imageObject} 0 R >> >> /Contents ${contentObject} 0 R >>`
+        ),
+        Buffer.concat([
+          Buffer.from(
+            `<< /Type /XObject /Subtype /Image /Width ${page.width} /Height ${page.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${page.jpeg.length} >>\nstream\n`
+          ),
+          page.jpeg,
+          Buffer.from('\nendstream')
+        ]),
+        Buffer.concat([
+          Buffer.from(`<< /Length ${content.length} >>\nstream\n`),
+          content,
+          Buffer.from('endstream')
+        ])
+      )
+    }
     const chunks: Buffer[] = [Buffer.from('%PDF-1.4\n%\xFF\xFF\xFF\xFF\n')]
     const offsets = [0]
     for (let index = 0; index < objects.length; index += 1) {

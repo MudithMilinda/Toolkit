@@ -15,7 +15,7 @@ interface Props {
   selectedOperation: FileOperation | null
   isDragging?: boolean
   onSelect: (operation: FileOperation) => void
-  onDirectFileDrop?: (file: File, operation: FileOperation) => void
+  onDirectFileDrop?: (files: File[], operation: FileOperation) => void
   onDismiss: () => void
 }
 
@@ -105,7 +105,7 @@ export default function RadialMenu({
             selected={selectedOperation?.id === operation.id}
             onHover={() => setHovered(index)}
             onSelect={() => selectIndex(index)}
-            onFileDrop={(droppedFile) => onDirectFileDrop?.(droppedFile, operation)}
+            onFileDrop={(droppedFiles) => onDirectFileDrop?.(droppedFiles, operation)}
           />
         ))}
       </svg>

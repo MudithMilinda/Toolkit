@@ -34,7 +34,9 @@ export default function DropZone({
         const target = event.target
         const clickedPanel =
           target instanceof Element &&
-          target.closest('.radial-menu, .image-options, .crop-panel, .compress-panel') !== null
+          target.closest(
+            '.radial-menu, .image-options, .crop-panel, .compress-panel, .edit-panel, .metadata-panel'
+          ) !== null
         if (!clickedPanel) onDismiss?.()
       }}
     >

@@ -9,7 +9,9 @@ import type {
   ConversionResult,
   ImageCompressionRequest,
   ImageCropRequest,
+  ImageEditRequest,
   ImageConversionRequest,
+  ImagesToPdfRequest,
   ImageResizeRequest,
   ImageTargetFormat
 } from './types'
@@ -31,6 +33,11 @@ export class ConversionManager {
     return job
   }
 
+  convertImagesToPdf(request: ImagesToPdfRequest): Promise<ConversionResult> {
+    const key = `pdf:${request.inputPaths.map((path) => resolve(path)).join(':')}`
+    return this.startJob(key, () => this.performPdfConversion(request))
+  }
+
   resizeImage(request: ImageResizeRequest): Promise<ConversionResult> {
     const key = `${resolve(request.inputPath)}:resize:${request.width ?? ''}x${request.height ?? ''}`
     return this.startJob(key, () => this.performResize(request))
@@ -44,6 +51,12 @@ export class ConversionManager {
     return this.startJob(
       `${resolve(request.inputPath)}:crop:${request.left},${request.top},${request.width},${request.height}`,
       () => this.performCrop(request)
+    )
+  }
+  editImage(request: ImageEditRequest): Promise<ConversionResult> {
+    return this.startJob(
+      `${resolve(request.inputPath)}:edit:${Object.values(request).join(':')}`,
+      () => this.performEdit(request)
     )
   }
 
@@ -78,6 +91,41 @@ export class ConversionManager {
         normalizedSource,
         request.targetFormat,
         source.size,
+        output.size,
+        startedAt
+      )
+    } catch (error) {
+      await this.outputManager.discardTemporaryFile(temporaryPath)
+      throw error
+    }
+  }
+
+  private async performPdfConversion(request: ImagesToPdfRequest): Promise<ConversionResult> {
+    if (!request.inputPaths.length) throw new Error('Select at least one image to create a PDF.')
+    const inputs = await Promise.all(
+      request.inputPaths.map((inputPath) => this.prepareInput(inputPath))
+    )
+    const firstInput = inputs[0]
+    const startedAt = Date.now()
+    const temporaryPath = await this.outputManager.createTemporaryPath(firstInput.inputPath)
+    try {
+      await this.imageConverter.convertToPdf(
+        inputs.map(({ inputPath }) => inputPath),
+        temporaryPath
+      )
+      const outputPath = await this.outputManager.publishTemporaryFile(
+        temporaryPath,
+        firstInput.inputPath,
+        'pdf',
+        inputs.length > 1 ? '-combined' : ''
+      )
+      const output = await stat(outputPath)
+      return this.result(
+        firstInput.inputPath,
+        outputPath,
+        firstInput.normalizedSource,
+        'pdf',
+        inputs.reduce((total, { source }) => total + source.size, 0),
         output.size,
         startedAt
       )
@@ -167,6 +215,34 @@ export class ConversionManager {
         inputPath,
         targetFormat,
         '-cropped'
+      )
+      const output = await stat(outputPath)
+      return this.result(
+        inputPath,
+        outputPath,
+        normalizedSource,
+        targetFormat,
+        source.size,
+        output.size,
+        startedAt
+      )
+    } catch (error) {
+      await this.outputManager.discardTemporaryFile(temporaryPath)
+      throw error
+    }
+  }
+  private async performEdit(request: ImageEditRequest): Promise<ConversionResult> {
+    const { inputPath, source, normalizedSource } = await this.prepareInput(request.inputPath)
+    const targetFormat = this.editTargetFormat(normalizedSource)
+    const startedAt = Date.now()
+    const temporaryPath = await this.outputManager.createTemporaryPath(inputPath)
+    try {
+      await this.imageConverter.edit(inputPath, temporaryPath, targetFormat, request)
+      const outputPath = await this.outputManager.publishTemporaryFile(
+        temporaryPath,
+        inputPath,
+        targetFormat,
+        '-edited'
       )
       const output = await stat(outputPath)
       return this.result(

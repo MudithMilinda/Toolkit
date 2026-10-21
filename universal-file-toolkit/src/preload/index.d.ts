@@ -3,12 +3,20 @@ declare global {
     api: {
       closeRadialMenu: () => Promise<void>
       notifyDropReceived: () => void
+      composeEmail: (inputPath: string) => Promise<void>
       getPathForFile: (file: File) => string
       getImagePreview: (inputPath: string) => Promise<string>
+      getImageMetadata: (inputPath: string) => Promise<Array<{ key: string; value: string }>>
       convertImage: (payload: {
         inputPath: string
         targetFormat: 'png' | 'jpg' | 'webp' | 'pdf' | 'heic' | 'tiff' | 'avif' | 'bmp'
       }) => Promise<{
+        outputPath: string
+        originalSize: number
+        outputSize: number
+        savedPercent: number
+      }>
+      convertImagesToPdf: (payload: { inputPaths: string[] }) => Promise<{
         outputPath: string
         originalSize: number
         outputSize: number
@@ -38,6 +46,24 @@ declare global {
         top: number
         width: number
         height: number
+      }) => Promise<{ outputPath: string }>
+      editImage: (payload: {
+        inputPath: string
+        operation: 'edit'
+        rotation: number
+        exposure: number
+        brightness: number
+        contrast: number
+        highlights: number
+        shadows: number
+        whites: number
+        blacks: number
+        saturation: number
+        vibrance: number
+        hue: number
+        temperature: number
+        tint: number
+        gamma: number
       }) => Promise<{ outputPath: string }>
       onRadialMenuOpened: (listener: () => void) => () => void
       onRadialMenuModifier: (listener: (modifier: 'shift' | 'command') => void) => () => void

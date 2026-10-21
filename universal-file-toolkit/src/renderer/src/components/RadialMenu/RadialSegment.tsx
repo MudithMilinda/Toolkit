@@ -4,13 +4,11 @@ import {
   Archive,
   FileOutput,
   Image,
-  ImagePlus,
   Info,
+  Mail,
   Music2,
-  Pencil,
   Scissors,
-  SlidersHorizontal,
-  UserRoundX
+  SlidersHorizontal
 } from 'lucide-react'
 import { motion } from 'motion/react'
 
@@ -22,7 +20,7 @@ interface Props {
   selected: boolean
   onHover: () => void
   onSelect: () => void
-  onFileDrop?: (file: File) => void
+  onFileDrop?: (files: File[]) => void
 }
 
 const CX = 150
@@ -115,26 +113,22 @@ export default function RadialSegment({
   const Icon =
     operation.id === 'compress'
       ? Archive
-      : operation.id === 'redact'
-        ? UserRoundX
-        : operation.id === 'annotate'
-          ? Pencil
-          : operation.id === 'edit'
-            ? SlidersHorizontal
-            : operation.id === 'add-background'
-              ? ImagePlus
-              : operation.id === 'crop' || operation.id === 'trim'
-                ? Scissors
-                : operation.id === 'metadata'
-                  ? Info
-                  : operation.id === 'audio' ||
-                      operation.id === 'mp3' ||
-                      operation.id === 'wav' ||
-                      operation.id === 'aac'
-                    ? Music2
-                    : operation.id === 'png' || operation.id === 'jpg' || operation.id === 'webp'
-                      ? Image
-                      : FileOutput
+      : operation.id === 'send-email'
+        ? Mail
+        : operation.id === 'edit'
+          ? SlidersHorizontal
+          : operation.id === 'crop' || operation.id === 'trim'
+            ? Scissors
+            : operation.id === 'metadata'
+              ? Info
+              : operation.id === 'audio' ||
+                  operation.id === 'mp3' ||
+                  operation.id === 'wav' ||
+                  operation.id === 'aac'
+                ? Music2
+                : operation.id === 'png' || operation.id === 'jpg' || operation.id === 'webp'
+                  ? Image
+                  : FileOutput
   return (
     <motion.g
       className="radial-segment-group"
@@ -146,11 +140,11 @@ export default function RadialSegment({
         onSelect()
       }}
       onDrop={(event: DragEvent<SVGGElement>) => {
-        const file = event.dataTransfer.files?.[0]
-        if (!file) return
+        const files = Array.from(event.dataTransfer.files ?? [])
+        if (!files.length) return
         event.preventDefault()
         event.stopPropagation()
-        onFileDrop?.(file)
+        onFileDrop?.(files)
       }}
       onDragEnter={(event: DragEvent<SVGGElement>) => {
         event.preventDefault()
@@ -168,7 +162,7 @@ export default function RadialSegment({
         className={`radial-segment${active ? ' active' : ''}${selected ? ' selected' : ''}`}
         d={roundedSegmentPath(index, total)}
       />
-      <Icon className="radial-icon" x={x - 7} y={y - 16} size={14} strokeWidth={1.8} />
+      <Icon className="radial-icon" x={x - 6} y={y - 14} size={12} strokeWidth={1.8} />
       <text
         className="radial-label"
         x={x}

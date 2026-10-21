@@ -17,6 +17,11 @@ export interface ImageConversionRequest {
   options?: ImageConversionOptions
 }
 
+/** Creates one PDF page per input image, in the order supplied. */
+export interface ImagesToPdfRequest {
+  inputPaths: string[]
+}
+
 export interface ImageResizeRequest {
   inputPath: string
   operation: 'resize'
@@ -40,6 +45,24 @@ export interface ImageCropRequest {
   top: number
   width: number
   height: number
+}
+export interface ImageEditRequest {
+  inputPath: string
+  operation: 'edit'
+  rotation: number
+  exposure: number
+  brightness: number
+  contrast: number
+  highlights: number
+  shadows: number
+  whites: number
+  blacks: number
+  saturation: number
+  vibrance: number
+  hue: number
+  temperature: number
+  tint: number
+  gamma: number
 }
 
 export interface ConversionResult {
