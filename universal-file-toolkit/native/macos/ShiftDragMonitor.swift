@@ -9,6 +9,9 @@ final class ShiftDragMonitor {
     private var runLoopSource: CFRunLoopSource?
     private var gestureActive = false
     private var activeModifier: String?
+    // Tab is not represented in CGEventFlags, unlike Shift. Track it
+    // separately so a Finder drag can use Tab as the image-tools (Crop) trigger.
+    private var tabKeyDown = false
 
     func start() {
         let promptOption = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
@@ -27,7 +30,9 @@ final class ShiftDragMonitor {
             "inputMonitoring": inputMonitoringTrusted
         ])
 
-        let eventTypes: [CGEventType] = [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .flagsChanged]
+        let eventTypes: [CGEventType] = [
+            .leftMouseDown, .leftMouseDragged, .leftMouseUp, .flagsChanged, .keyDown, .keyUp
+        ]
         let eventMask = eventTypes.reduce(CGEventMask(0)) { partialResult, eventType in
             partialResult | (CGEventMask(1) << CGEventMask(eventType.rawValue))
         }
@@ -59,6 +64,26 @@ final class ShiftDragMonitor {
     }
 
     private func handle(type: CGEventType, event: CGEvent) {
+        if type == .keyDown || type == .keyUp {
+            // macOS virtual key code for Tab. Keeping this at the event-tap layer
+            // means it also works while Finder owns the active drag.
+            guard event.getIntegerValueField(.keyboardEventKeycode) == 48 else { return }
+            tabKeyDown = type == .keyDown
+
+            guard gestureActive else { return }
+            let modifier = dragModifier(for: event.flags)
+            if let modifier {
+                if activeModifier != modifier {
+                    activeModifier = modifier
+                    emit(["type": "modifier-changed", "modifier": modifier])
+                }
+            } else {
+                emit(["type": "gesture-ended"])
+                gestureActive = false
+                activeModifier = nil
+            }
+            return
+        }
         if type == .leftMouseDown && !gestureActive {
             let location = event.location
             emit(["type": "outside-click", "x": location.x, "y": location.y])
@@ -91,7 +116,9 @@ final class ShiftDragMonitor {
     }
 
     private func dragModifier(for flags: CGEventFlags) -> String? {
-        if flags.contains(.maskCommand) { return "command" }
+        // The renderer already treats "command" as the image-tools menu, so
+        // Tab deliberately maps to that same mode without widening the IPC API.
+        if tabKeyDown { return "command" }
         if flags.contains(.maskShift) { return "shift" }
         return nil
     }
