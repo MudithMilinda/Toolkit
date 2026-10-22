@@ -7,7 +7,6 @@ interface DropZoneProps extends PropsWithChildren {
 }
 export default function DropZone({
   children,
-  isDragging,
   onDismiss,
   dragHandlers
 }: DropZoneProps): React.JSX.Element {
@@ -26,7 +25,7 @@ export default function DropZone({
   }
   return (
     <div
-      className={`drop-zone ${isDragging ? 'is-dragging' : ''}`}
+      className="grid size-full cursor-default place-items-center"
       {...dragHandlers}
       onClick={(event) => {
         // The full window is the drop zone, but its transparent area is covered
@@ -34,13 +33,11 @@ export default function DropZone({
         const target = event.target
         const clickedPanel =
           target instanceof Element &&
-          target.closest(
-            '.radial-menu, .image-options, .crop-panel, .compress-panel, .edit-panel, .metadata-panel'
-          ) !== null
+          target.closest('.radial-menu, [data-panel]') !== null
         if (!clickedPanel) onDismiss?.()
       }}
     >
-      <input ref={inputRef} className="file-input" type="file" onChange={selectFile} />
+      <input ref={inputRef} className="hidden" type="file" onChange={selectFile} />
       {children}
     </div>
   )

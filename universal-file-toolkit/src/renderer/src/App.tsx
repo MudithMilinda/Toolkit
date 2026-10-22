@@ -19,6 +19,7 @@ function App(): React.JSX.Element {
   const [operation, setOperation] = useState<FileOperation | null>(null)
   const [isClosing, setIsClosing] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const [panelStatus, setPanelStatus] = useState<string | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
   const [dragModifier, setDragModifier] = useState<'shift' | 'command'>('shift')
   const [optionsMode, setOptionsMode] = useState<
@@ -80,6 +81,7 @@ function App(): React.JSX.Element {
         nextOperation.id === 'edit' ||
         nextOperation.id === 'metadata'
       ) {
+        setPanelStatus(null)
         setOptionsMode(nextOperation.id)
         return
       }
@@ -128,10 +130,8 @@ function App(): React.JSX.Element {
     ) => {
       if (!file) return
       const inputPath = window.api.getPathForFile(file)
-      setOptionsMode(null)
       setIsProcessing(true)
-      setIsClosing(true)
-      setNotice(`${mode === 'resize' ? 'Resizing' : 'Compressing'} ${file.name}…`)
+      setPanelStatus(`${mode === 'resize' ? 'Resizing' : 'Compressing'}…`)
       const job =
         mode === 'resize'
           ? window.api.resizeImage({
@@ -148,11 +148,11 @@ function App(): React.JSX.Element {
             })
       void job
         .then((result) => {
-          setNotice(`Conversion successful — ${result.outputPath.split(/[\\/]/).pop()}.`)
+          setPanelStatus(`Success — ${result.outputPath.split(/[\\/]/).pop()}`)
           window.setTimeout(() => void window.api.closeRadialMenu(), 1400)
         })
         .catch((error: unknown) =>
-          setNotice(error instanceof Error ? error.message : 'Image processing failed.')
+          setPanelStatus(error instanceof Error ? error.message : 'Image processing failed.')
         )
         .finally(() => setIsProcessing(false))
     },
@@ -166,6 +166,7 @@ function App(): React.JSX.Element {
     reset()
     setOperation(null)
     setNotice(null)
+    setPanelStatus(null)
     setOptionsMode(null)
     setIsClosing(false)
     setDragModifier('shift')
@@ -185,7 +186,7 @@ function App(): React.JSX.Element {
 
   return (
     <AppLayout>
-      <section className="radial-utility" aria-label="Universal File Toolkit">
+      <section className="relative z-1 grid size-full place-items-center" aria-label="Universal File Toolkit">
         <DropZone
           dragHandlers={dragHandlers}
           isDragging={!optionsMode && isDragging}
@@ -194,7 +195,7 @@ function App(): React.JSX.Element {
           <AnimatePresence>
             {!isClosing && !optionsMode && (
               <motion.div
-                className="compact-stage"
+                className="grid size-full place-items-center"
                 initial={{ opacity: 0, scale: 0.82 }}
                 animate={{ opacity: 1, scale: 1 }}
                 exit={{ opacity: 0, scale: 0.82 }}
@@ -253,7 +254,11 @@ function App(): React.JSX.Element {
               <ImageOptionsPanel
                 mode={optionsMode}
                 file={file}
-                onCancel={() => setOptionsMode(null)}
+                statusMessage={panelStatus}
+                onCancel={() => {
+                  setPanelStatus(null)
+                  setOptionsMode(null)
+                }}
                 onResize={(payload) => runEdit('resize', { ...payload, operation: 'resize' })}
                 onCompress={(payload) => runEdit('compress', payload)}
               />
@@ -261,26 +266,26 @@ function App(): React.JSX.Element {
             {optionsMode === 'crop' && file && !isClosing && (
               <ImageCropPanel
                 file={file}
-                onCancel={() => setOptionsMode(null)}
+                statusMessage={panelStatus}
+                onCancel={() => {
+                  setPanelStatus(null)
+                  setOptionsMode(null)
+                }}
                 onNewFile={resetMenu}
                 isProcessing={isProcessing}
                 onApply={(area) => {
                   const inputPath = window.api.getPathForFile(file)
                   clearDragging()
                   setIsProcessing(true)
-                  setNotice(`Cropping ${file.name}…`)
+                  setPanelStatus('Cropping…')
                   void window.api
                     .cropImage({ inputPath, operation: 'crop', ...area })
                     .then((result) => {
-                      setNotice(
-                        `Conversion successful — ${result.outputPath.split(/[\\/]/).pop()}.`
-                      )
-                      setIsClosing(true)
-                      window.setTimeout(() => void window.api.closeRadialMenu(), 240)
+                      setPanelStatus(`Success — ${result.outputPath.split(/[\\/]/).pop()}`)
+                      window.setTimeout(() => void window.api.closeRadialMenu(), 1400)
                     })
                     .catch((error: unknown) => {
-                      setIsClosing(false)
-                      setNotice(error instanceof Error ? error.message : 'Crop failed.')
+                      setPanelStatus(error instanceof Error ? error.message : 'Crop failed.')
                     })
                     .finally(() => setIsProcessing(false))
                 }}
@@ -289,20 +294,23 @@ function App(): React.JSX.Element {
             {optionsMode === 'edit' && file && !isClosing && (
               <ImageEditPanel
                 file={file}
-                onCancel={() => setOptionsMode(null)}
+                statusMessage={panelStatus}
+                onCancel={() => {
+                  setPanelStatus(null)
+                  setOptionsMode(null)
+                }}
                 onSave={(edits) => {
                   const inputPath = window.api.getPathForFile(file)
                   setIsProcessing(true)
-                  setNotice(`Editing ${file.name}…`)
+                  setPanelStatus('Saving…')
                   void window.api
                     .editImage({ inputPath, operation: 'edit', ...edits })
                     .then((result) => {
-                      setNotice(`Saved edited copy — ${result.outputPath.split(/[\\/]/).pop()}.`)
-                      setIsClosing(true)
-                      window.setTimeout(() => void window.api.closeRadialMenu(), 240)
+                      setPanelStatus(`Success — ${result.outputPath.split(/[\\/]/).pop()}`)
+                      window.setTimeout(() => void window.api.closeRadialMenu(), 1400)
                     })
                     .catch((error: unknown) =>
-                      setNotice(error instanceof Error ? error.message : 'Edit failed.')
+                      setPanelStatus(error instanceof Error ? error.message : 'Edit failed.')
                     )
                     .finally(() => setIsProcessing(false))
                 }}
@@ -317,7 +325,7 @@ function App(): React.JSX.Element {
       <AnimatePresence>
         {notice && (
           <motion.p
-            className="utility-notice"
+            className="absolute bottom-6 z-5 m-0 max-w-[260px] rounded-full border border-cyan-300/25 bg-[#071421]/82 px-2.5 py-1.5 text-center text-[9px] text-cyan-100 backdrop-blur-[12px]"
             initial={{ opacity: 0, y: 5 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}

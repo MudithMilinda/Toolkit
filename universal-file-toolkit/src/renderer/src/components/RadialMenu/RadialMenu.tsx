@@ -4,7 +4,6 @@ import type { FileOperation } from '../../utils/fileFormats'
 import { getFileCategory, getFileExtension } from '../../utils/fileFormats'
 import { useKeyboardNavigation } from '../../hooks/useKeyboardNavigation'
 import RadialSegment from './RadialSegment'
-import OperationTooltip from '../OperationTooltip'
 import './radialMenu.css'
 
 interface Props {
@@ -91,9 +90,6 @@ export default function RadialMenu({
 
   return (
     <div className="radial-menu" aria-label="File operation menu">
-      <OperationTooltip
-        label={hovered !== null ? operations[hovered].label : 'Use arrows + Enter'}
-      />
       <svg viewBox="0 0 300 300" className="radial-svg">
         {operations.map((operation, index) => (
           <RadialSegment

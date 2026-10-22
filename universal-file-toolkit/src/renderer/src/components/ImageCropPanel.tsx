@@ -42,13 +42,15 @@ export default function ImageCropPanel({
   onCancel,
   onApply,
   onNewFile,
-  isProcessing = false
+  isProcessing = false,
+  statusMessage
 }: {
   file: File
   onCancel: () => void
   onApply: (area: CropArea) => void
   onNewFile: () => void
   isProcessing?: boolean
+  statusMessage?: string | null
 }): React.JSX.Element {
   const [source, setSource] = useState<string | null>(null)
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 })
@@ -193,25 +195,31 @@ export default function ImageCropPanel({
     : undefined
   return (
     <motion.section
-      className="crop-panel"
+      data-panel
+      className="w-[min(400px,calc(100vw-20px))] overflow-hidden rounded-[24px] border border-sky-200/22 bg-[#181818] text-[#f5f5f5] shadow-[0_18px_42px_rgba(0,0,0,.42)]"
       initial={{ opacity: 0, scale: 0.92 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.97, y: -5 }}
       transition={{ duration: 0.22, ease: 'easeOut' }}
     >
-      <header className="crop-header">
-        <button className="crop-close" onClick={onCancel} aria-label="Close crop editor">
+      <header className="relative grid h-11 place-items-center border-b border-sky-200/16">
+        <button
+          className="absolute left-3 grid size-6 place-items-center rounded-full border-0 bg-[#f1f1f1] p-0 text-[#181818] hover:bg-white [&>svg]:size-3"
+          onClick={onCancel}
+          aria-label="Close crop editor"
+        >
           <X size={24} strokeWidth={2.4} />
         </button>
-        <h1>Crop Image</h1>
-        <button className="crop-new-file" onClick={onNewFile} disabled={isProcessing}>
+        <h1 className="m-0 text-[15px] font-bold tracking-[-.03em]">Crop Image</h1>
+        <button className="absolute right-3 cursor-pointer rounded-full border-0 bg-[#f1f1f1] px-1.5 py-1 text-[8px] font-semibold text-[#181818] hover:bg-white disabled:cursor-default disabled:opacity-55" onClick={onNewFile} disabled={isProcessing}>
           New file
         </button>
       </header>
-      <div className="crop-stage" ref={previewRef}>
+      <div className="relative h-[220px] overflow-hidden bg-[#252525] touch-none" ref={previewRef}>
         {source && (
           <img
             src={source}
+            className="absolute inset-0 size-full object-contain select-none"
             alt="Crop preview"
             draggable={false}
             onLoad={(event) => {
@@ -223,7 +231,7 @@ export default function ImageCropPanel({
         )}
         {crop.width > 0 && (
           <div
-            className="crop-frame"
+            className="absolute z-1 min-h-3 min-w-3 cursor-move border-[3px] border-[#f1f1f1] shadow-[0_0_0_100vmax_rgba(0,0,0,.42)] touch-none"
             style={frameStyle}
             onPointerDown={(event) => beginDrag(event, 'move')}
             onPointerMove={drag}
@@ -231,12 +239,12 @@ export default function ImageCropPanel({
               dragRef.current = null
             }}
           >
-            <span className="crop-grid crop-grid-a" />
-            <span className="crop-grid crop-grid-b" />
+            <span className="pointer-events-none absolute inset-y-0 left-1/3 right-1/3 border-x border-white/58" />
+            <span className="pointer-events-none absolute inset-x-0 top-1/3 bottom-1/3 border-y border-white/58" />
             {(['n', 'e', 's', 'w', 'ne', 'nw', 'se', 'sw'] as Handle[]).map((handle) => (
               <button
                 key={handle}
-                className={`crop-handle crop-handle-${handle}`}
+                className={`absolute z-2 size-[13px] rounded-[3px] border-0 bg-[#f1f1f1] p-0 shadow-[0_1px_2px_rgba(83,27,6,.28)] ${handle === 'n' ? 'left-1/2 top-[-8px] ml-[-6.5px] cursor-ns-resize' : handle === 's' ? 'bottom-[-8px] left-1/2 ml-[-6.5px] cursor-ns-resize' : handle === 'e' ? 'right-[-8px] top-1/2 mt-[-6.5px] cursor-ew-resize' : handle === 'w' ? 'left-[-8px] top-1/2 mt-[-6.5px] cursor-ew-resize' : handle === 'ne' ? 'right-[-8px] top-[-8px] cursor-nesw-resize' : handle === 'nw' ? 'left-[-8px] top-[-8px] cursor-nwse-resize' : handle === 'se' ? 'right-[-8px] bottom-[-8px] cursor-nwse-resize' : 'bottom-[-8px] left-[-8px] cursor-nesw-resize'}`}
                 aria-label={`Resize crop ${handle}`}
                 onPointerDown={(event) => beginDrag(event, handle)}
                 onPointerMove={drag}
@@ -248,43 +256,46 @@ export default function ImageCropPanel({
           </div>
         )}
       </div>
-      <div className="crop-controls">
-        <span className="crop-label">Aspect ratio</span>
-        <div className="crop-ratios" role="group" aria-label="Aspect ratio">
+      <div className="px-4 pt-4 pb-3.5">
+        <span className="mb-[9px] ml-0.5 block text-xs font-semibold text-white/64">Aspect ratio</span>
+        <div className="flex gap-1" role="group" aria-label="Aspect ratio">
           {ratios.map((item) => (
             <button
               key={item.label}
-              className={ratio === item.value ? 'active' : ''}
+              className={`min-w-0 flex-1 cursor-pointer rounded-full border-0 px-0.5 py-1 text-[8px] font-semibold text-[#181818] ${ratio === item.value ? 'bg-white shadow-[inset_0_0_0_1px_rgba(255,255,255,.3)]' : 'bg-[#f1f1f1] hover:bg-white'}`}
               onClick={() => selectRatio(item.value)}
             >
               {item.label}
             </button>
           ))}
         </div>
-        <div className="crop-dimensions">
-          <label>
+        <div className="mt-[15px] flex items-end gap-2">
+          <label className="grid grid-cols-[16px_1fr] items-center gap-[5px] text-xs font-semibold text-white/64">
             W
             <input
+              className="h-7 w-20 rounded-[7px] border border-sky-200/22 bg-[#252525] px-2 py-1 text-[11px] font-semibold text-[#f5f5f5] outline-none focus:border-[#f1f1f1] focus:shadow-[0_0_0_2px_rgba(159,227,254,.2)]"
               inputMode="numeric"
               value={crop.width || ''}
               onChange={(event) => setDimension('width', event.target.value)}
             />
           </label>
-          <label>
+          <label className="grid grid-cols-[16px_1fr] items-center gap-[5px] text-xs font-semibold text-white/64">
             H
             <input
+              className="h-7 w-20 rounded-[7px] border border-sky-200/22 bg-[#252525] px-2 py-1 text-[11px] font-semibold text-[#f5f5f5] outline-none focus:border-[#f1f1f1] focus:shadow-[0_0_0_2px_rgba(159,227,254,.2)]"
               inputMode="numeric"
               value={crop.height || ''}
               onChange={(event) => setDimension('height', event.target.value)}
             />
           </label>
-          <span>px</span>
+          <span className="pb-2 text-xs text-white/64">px</span>
         </div>
       </div>
-      <footer className="crop-footer">
-        <button onClick={() => selectRatio(ratio)}>Reset</button>
+      <footer className="flex items-center justify-between border-t border-sky-200/16 px-4 pt-[13px] pb-4">
+        {statusMessage && <span className="text-[8px] text-emerald-400">{statusMessage}</span>}
+        <button className="cursor-pointer rounded-full border-0 bg-[#f1f1f1] px-1.5 py-1 text-[8px] font-semibold text-[#181818] hover:bg-white" onClick={() => selectRatio(ratio)}>Reset</button>
         <button
-          className="crop-apply"
+          className="cursor-pointer rounded-full border-0 bg-[#f1f1f1] px-1.5 py-1 text-[8px] font-semibold text-[#181818] hover:bg-white disabled:cursor-default disabled:opacity-45"
           disabled={!crop.width || isProcessing}
           onClick={() => onApply(crop)}
         >

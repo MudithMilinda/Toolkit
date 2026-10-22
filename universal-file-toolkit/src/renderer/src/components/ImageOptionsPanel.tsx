@@ -22,13 +22,15 @@ export default function ImageOptionsPanel({
   file,
   onCancel,
   onResize,
-  onCompress
+  onCompress,
+  statusMessage
 }: {
   mode: 'resize' | 'compress'
   file: File
   onCancel: () => void
   onResize: (payload: ResizePayload) => void
   onCompress: (payload: CompressPayload) => void
+  statusMessage?: string | null
 }): React.JSX.Element {
   const [width, setWidth] = useState('1920')
   const [height, setHeight] = useState('')
@@ -68,7 +70,8 @@ export default function ImageOptionsPanel({
     const maxDimension = imageSize === 'original' ? undefined : Number(imageSize)
     return (
       <motion.form
-        className="compress-panel"
+        data-panel
+        className="w-[min(340px,calc(100vw-20px))] overflow-hidden rounded-[20px] border border-sky-200/22 bg-[#181818] text-[#f5f5f5] shadow-[0_18px_42px_rgba(0,0,0,.42)]"
         initial={{ opacity: 0, scale: 0.92 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, scale: 0.97, y: -5 }}
@@ -78,47 +81,48 @@ export default function ImageOptionsPanel({
           onCompress({ quality, maxDimension })
         }}
       >
-        <header className="compress-header">
+        <header className="relative grid h-11 place-items-center border-b border-sky-200/16">
           <button
             type="button"
-            className="compress-close"
+            className="absolute left-3 grid size-6 place-items-center rounded-full bg-[#f1f1f1] p-0 text-[#181818] hover:bg-white [&>svg]:size-3"
             onClick={onCancel}
             aria-label="Close compressor"
           >
             <X size={24} strokeWidth={2.4} />
           </button>
-          <h1>Compress</h1>
+          <h1 className="m-0 text-[15px] tracking-[-.04em]">Compress</h1>
         </header>
-        <div className="compress-content">
-          <p className="compress-file" title={file.name}>
+        <div className="px-4 pt-3 pb-2.5">
+          <p className="m-0 mb-[15px] overflow-hidden text-[11px] text-white/64 text-ellipsis whitespace-nowrap" title={file.name}>
             {file.name}
           </p>
-          <p className="compress-original">Original size: {formatBytes(file.size)}</p>
-          <h2>Compression preset</h2>
-          <div className="compress-presets" role="group" aria-label="Compression preset">
+          <p className="m-0 mb-3 text-[13px] font-bold tracking-[-.025em]">Original size: {formatBytes(file.size)}</p>
+          <h2 className="m-0 mb-2 text-xs tracking-[-.02em]">Compression preset</h2>
+          <div className="flex w-fit gap-1" role="group" aria-label="Compression preset">
             <button
               type="button"
-              className={quality === 78 ? 'active' : ''}
+              className={`cursor-pointer rounded-full border-0 px-1.5 py-0.5 text-[8px] text-[#181818] ${quality === 78 ? 'bg-white shadow-[inset_0_0_0_1px_rgba(255,255,255,.32)]' : 'bg-[#f1f1f1] hover:bg-white'}`}
               onClick={() => setQuality(78)}
             >
               Balanced
             </button>
             <button
               type="button"
-              className={quality === 55 ? 'active' : ''}
+              className={`cursor-pointer rounded-full border-0 px-1.5 py-0.5 text-[8px] text-[#181818] ${quality === 55 ? 'bg-white shadow-[inset_0_0_0_1px_rgba(255,255,255,.32)]' : 'bg-[#f1f1f1] hover:bg-white'}`}
               onClick={() => setQuality(55)}
             >
               Strong
             </button>
           </div>
-          <p className="compress-description">
+          <p className="my-2 mb-3 text-[10px] text-white/64">
             {quality === 55
               ? 'Smaller file with more quality loss.'
               : 'Smaller file with less quality loss.'}
           </p>
-          <label className="compress-image-size">
+          <label className="grid grid-cols-[max-content_minmax(0,1fr)] items-center gap-2 text-[10px] font-semibold">
             <span>Image size</span>
             <select
+              className="w-full min-w-0 rounded-lg border-0 bg-[#252525] px-2 py-[7px] pr-[25px] text-[10px] text-[#f5f5f5] outline-none"
               value={imageSize}
               onChange={(event) => setImageSize(event.target.value as ImageSize)}
             >
@@ -129,25 +133,26 @@ export default function ImageOptionsPanel({
             </select>
           </label>
           {dimensions && (
-            <p className="compress-dimensions">
+            <p className="m-0 mt-2 text-[10px] text-white/64">
               Original dimensions: {dimensions.width} × {dimensions.height} px
             </p>
           )}
-          <div className={`compress-estimate ${estimate.percent >= 0 ? 'saving' : 'increase'}`}>
-            <span>Estimated output</span>
-            <strong>{formatBytes(estimate.bytes)}</strong>
-            <small>
+          <div className="mt-3 grid grid-cols-[1fr_auto] gap-x-2.5 gap-y-[3px] rounded-[10px] bg-[#252525] p-2.5">
+            <span className="text-[11px] text-white/64">Estimated output</span>
+            <strong className="text-sm">{formatBytes(estimate.bytes)}</strong>
+            <small className={`col-span-full text-[11px] ${estimate.percent >= 0 ? 'text-[#21815d]' : 'text-[#be4d35]'}`}>
               {estimate.percent >= 0
                 ? `About ${estimate.percent}% smaller`
                 : `About ${Math.abs(estimate.percent)}% larger`}
             </small>
           </div>
         </div>
-        <footer className="compress-footer">
-          <button type="button" onClick={onCancel}>
+        <footer className="flex items-center justify-end gap-1.5 border-t border-sky-200/16 px-3 pt-2 pb-2.5">
+          {statusMessage && <span className="mr-auto text-[8px] text-emerald-400">{statusMessage}</span>}
+          <button className="cursor-pointer rounded-full border-0 bg-[#f1f1f1] px-1.5 py-1 text-[8px] font-semibold text-[#181818] hover:bg-white" type="button" onClick={onCancel}>
             Cancel
           </button>
-          <button className="compress-apply" type="submit">
+          <button className="cursor-pointer rounded-full border-0 bg-[#f1f1f1] px-1.5 py-1 text-[8px] font-semibold text-[#181818] hover:bg-white" type="submit">
             Compress
           </button>
         </footer>
@@ -157,7 +162,8 @@ export default function ImageOptionsPanel({
 
   return (
     <motion.form
-      className="image-options glass-panel"
+      data-panel
+      className="w-[292px] rounded-[22px] border border-sky-200/22 bg-[#181818] p-[15px] text-[#f5f5f5] shadow-[0_22px_55px_rgba(0,0,0,.46)]"
       initial={{ opacity: 0, scale: 0.88 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.88 }}
@@ -172,37 +178,39 @@ export default function ImageOptionsPanel({
         })
       }}
     >
-      <header>
-        <span className="image-options-icon">
+      <header className="mb-[15px] flex items-center gap-[9px]">
+        <span className="grid size-[29px] place-items-center rounded-[10px] bg-cyan-400/12 text-cyan-200">
           <Minimize2 size={16} />
         </span>
-        <div>
-          <strong>Resize image</strong>
-          <small title={file.name}>{file.name}</small>
+        <div className="grid min-w-0 flex-1 gap-0.5">
+          <strong className="text-xs">Resize image</strong>
+          <small className="overflow-hidden text-[9px] text-white/64 text-ellipsis whitespace-nowrap" title={file.name}>{file.name}</small>
         </div>
         <button
           type="button"
-          className="image-options-close"
+          className="grid size-[30px] cursor-pointer place-items-center rounded-full border-0 bg-[#f1f1f1] p-0 text-[#181818] hover:bg-white [&>svg]:size-[15px]"
           onClick={onCancel}
           aria-label="Cancel"
         >
           <X size={15} />
         </button>
       </header>
-      <div className="dimension-fields">
-        <label>
+      <div className="grid grid-cols-[1fr_12px_1fr] items-end gap-1.5">
+        <label className="grid gap-[5px] text-[9px] text-white/64">
           Width
           <input
+            className="w-full rounded-[9px] border border-sky-200/22 bg-[#252525] p-[7px] text-[11px] text-[#f5f5f5] outline-none"
             inputMode="numeric"
             value={width}
             onChange={(event) => setWidth(event.target.value.replace(/\D/g, ''))}
             placeholder="auto"
           />
         </label>
-        <span>×</span>
-        <label>
+        <span className="pb-[7px] text-center text-[#8290ac]">×</span>
+        <label className="grid gap-[5px] text-[9px] text-white/64">
           Height
           <input
+            className="w-full rounded-[9px] border border-sky-200/22 bg-[#252525] p-[7px] text-[11px] text-[#f5f5f5] outline-none"
             inputMode="numeric"
             value={height}
             onChange={(event) => setHeight(event.target.value.replace(/\D/g, ''))}
@@ -210,9 +218,10 @@ export default function ImageOptionsPanel({
           />
         </label>
       </div>
-      <label className="select-field">
+      <label className="mt-[11px] grid gap-[5px] text-[9px] text-white/64">
         Fit
         <select
+          className="w-full rounded-[9px] border border-sky-200/22 bg-[#252525] p-[7px] text-[11px] text-[#f5f5f5] outline-none"
           value={fit}
           onChange={(event) => setFit(event.target.value as ResizePayload['fit'])}
         >
@@ -221,19 +230,21 @@ export default function ImageOptionsPanel({
           <option value="fill">Stretch</option>
         </select>
       </label>
-      <label className="check-field">
+      <label className="mt-[11px] flex items-center gap-1.5 text-[10px] text-white/64">
         <input
+          className="w-auto accent-[#f1f1f1]"
           type="checkbox"
           checked={withoutEnlargement}
           onChange={(event) => setWithoutEnlargement(event.target.checked)}
         />{' '}
         Never enlarge
       </label>
-      <footer>
-        <button type="button" onClick={onCancel}>
+      <footer className="mt-[15px] flex items-center justify-end gap-[7px]">
+        {statusMessage && <span className="mr-auto text-[8px] text-emerald-400">{statusMessage}</span>}
+        <button className="cursor-pointer rounded-full border-0 bg-[#f1f1f1] px-1.5 py-1 text-[8px] text-[#181818] hover:bg-white" type="button" onClick={onCancel}>
           Cancel
         </button>
-        <button className="apply-button" type="submit">
+        <button className="cursor-pointer rounded-full border-0 bg-[#f1f1f1] px-1.5 py-1 text-[8px] text-[#181818] hover:bg-white" type="submit">
           Apply
         </button>
       </footer>

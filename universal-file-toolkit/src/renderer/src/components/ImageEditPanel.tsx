@@ -59,11 +59,13 @@ const fields: { key: keyof Edits; label: string; min: number; max: number; unit?
 export default function ImageEditPanel({
   file,
   onCancel,
-  onSave
+  onSave,
+  statusMessage
 }: {
   file: File
   onCancel: () => void
   onSave: (edits: Edits & { rotation: number }) => void
+  statusMessage?: string | null
 }): React.JSX.Element {
   const [source, setSource] = useState('')
   const [edits, setEdits] = useState(initial)
@@ -148,17 +150,23 @@ export default function ImageEditPanel({
   }
   return (
     <motion.section
-      className="edit-panel"
+      data-panel
+      className="flex h-[min(480px,calc(100vh-20px))] w-[min(460px,calc(100vw-20px))] flex-col overflow-hidden rounded-[24px] border border-sky-200/22 bg-[#181818] text-[#f5f5f5] shadow-[0_18px_42px_rgba(0,0,0,.42)]"
       initial={{ opacity: 0, scale: 0.92 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0 }}
     >
-      <header className="edit-header">
-        <button onClick={onCancel} aria-label="Close editor">
+      <header className="relative grid h-11 shrink-0 grid-cols-[1fr_auto_1fr] items-center border-b border-sky-200/16 px-3">
+        <button
+          className="grid size-6 cursor-pointer place-items-center rounded-full border-0 bg-[#f1f1f1] p-0 text-[#181818] hover:bg-white [&>svg]:size-3"
+          onClick={onCancel}
+          aria-label="Close editor"
+        >
           <X size={18} />
         </button>
-        <h1>Edit Photo</h1>
+        <h1 className="m-0 text-[15px]">Edit Photo</h1>
         <button
+          className="justify-self-end cursor-pointer rounded-full border-0 bg-[#f1f1f1] px-1.5 py-1 text-[8px] text-[#181818] hover:bg-white"
           onClick={() => {
             setEdits(initial)
             setRotation(0)
@@ -170,7 +178,7 @@ export default function ImageEditPanel({
         </button>
       </header>
       <div
-        className="edit-preview"
+        className="relative grid h-[200px] shrink-0 place-items-center overflow-hidden bg-[#161616] touch-none"
         ref={previewRef}
         onPointerDown={beginAnnotation}
         onPointerMove={moveAnnotation}
@@ -185,6 +193,7 @@ export default function ImageEditPanel({
         {source && (
           <img
             src={source}
+            className="size-full object-contain select-none"
             alt="Edit preview"
             draggable={false}
             style={{
@@ -193,10 +202,10 @@ export default function ImageEditPanel({
             }}
           />
         )}
-        <span className="edit-temperature-wash" style={temperatureWash} />
+        <span className="pointer-events-none absolute inset-0 mix-blend-soft-light" style={temperatureWash} />
         {textDraft && (
           <input
-            className="edit-text-input"
+            className="absolute z-3 min-w-[110px] -translate-y-full rounded border border-[#f1f1f1] bg-transparent px-1.5 py-1 text-[13px] font-medium text-white outline-none shadow-[0_0_0_2px_rgba(159,227,254,.2)] placeholder:text-white/82"
             autoFocus
             value={textDraft.value}
             style={{ left: `${textDraft.x}%`, top: `${textDraft.y}%` }}
@@ -224,16 +233,17 @@ export default function ImageEditPanel({
             }}
           />
         )}
-        <svg className="edit-annotations" viewBox="0 0 100 100" preserveAspectRatio="none">
+        <svg className="pointer-events-none absolute inset-0 size-full" viewBox="0 0 100 100" preserveAspectRatio="none">
           {[...annotations, ...(draft ? [draft] : [])].map((item, index) => (
             <AnnotationShape key={index} item={item} />
           ))}
         </svg>
       </div>
-      <nav className="edit-toolbar" aria-label="Annotation tools">
+      <nav className="flex shrink-0 gap-1.5 border-b border-sky-200/16 bg-[#181818] px-3 py-1.5" aria-label="Annotation tools">
         <button
           type="button"
           onClick={() => setAnnotations((items) => items.slice(0, -1))}
+          className="grid size-6 cursor-pointer place-items-center rounded-full border-0 bg-[#f1f1f1] text-[#181818] hover:bg-white"
           title="Undo last annotation"
         >
           <Undo2 size={14} />
@@ -241,13 +251,14 @@ export default function ImageEditPanel({
         <button
           type="button"
           onClick={() => setRotation((value) => (value + 90) % 360)}
+          className="grid size-6 cursor-pointer place-items-center rounded-full border-0 bg-[#f1f1f1] text-[#181818] hover:bg-white"
           title="Rotate 90 degrees"
         >
           <RotateCw size={14} />
         </button>
         <button
           type="button"
-          className={tool === 'text' ? 'active' : ''}
+          className={`grid size-6 cursor-pointer place-items-center rounded-full border-0 text-[#181818] ${tool === 'text' ? 'bg-white' : 'bg-[#f1f1f1] hover:bg-white'}`}
           onClick={() => setTool('text')}
           title="Text"
         >
@@ -255,7 +266,7 @@ export default function ImageEditPanel({
         </button>
         <button
           type="button"
-          className={tool === 'rectangle' ? 'active' : ''}
+          className={`grid size-6 cursor-pointer place-items-center rounded-full border-0 text-[#181818] ${tool === 'rectangle' ? 'bg-white' : 'bg-[#f1f1f1] hover:bg-white'}`}
           onClick={() => setTool('rectangle')}
           title="Rectangle"
         >
@@ -263,7 +274,7 @@ export default function ImageEditPanel({
         </button>
         <button
           type="button"
-          className={tool === 'circle' ? 'active' : ''}
+          className={`grid size-6 cursor-pointer place-items-center rounded-full border-0 text-[#181818] ${tool === 'circle' ? 'bg-white' : 'bg-[#f1f1f1] hover:bg-white'}`}
           onClick={() => setTool('circle')}
           title="Circle"
         >
@@ -271,7 +282,7 @@ export default function ImageEditPanel({
         </button>
         <button
           type="button"
-          className={tool === 'pen' ? 'active' : ''}
+          className={`grid size-6 cursor-pointer place-items-center rounded-full border-0 text-[#181818] ${tool === 'pen' ? 'bg-white' : 'bg-[#f1f1f1] hover:bg-white'}`}
           onClick={() => setTool('pen')}
           title="Draw"
         >
@@ -279,7 +290,7 @@ export default function ImageEditPanel({
         </button>
         <button
           type="button"
-          className={tool === 'step' ? 'active' : ''}
+          className={`grid size-6 cursor-pointer place-items-center rounded-full border-0 text-[#181818] ${tool === 'step' ? 'bg-white' : 'bg-[#f1f1f1] hover:bg-white'}`}
           onClick={() => setTool('step')}
           title="Numbered marker"
         >
@@ -287,25 +298,26 @@ export default function ImageEditPanel({
         </button>
         <button
           type="button"
-          className={tool === 'magnify' ? 'active' : ''}
+          className={`grid size-6 cursor-pointer place-items-center rounded-full border-0 text-[#181818] ${tool === 'magnify' ? 'bg-white' : 'bg-[#f1f1f1] hover:bg-white'}`}
           onClick={() => setTool('magnify')}
           title="Magnifier"
         >
           <ZoomIn size={14} />
         </button>
       </nav>
-      <div className="edit-controls">
-        <h2>Light</h2>
+      <div className="min-h-0 flex-1 overflow-y-auto px-[18px] py-3">
+        <h2 className="my-[5px] mb-2 text-xs text-white/64">Light</h2>
         {fields.slice(0, 8).map((field) => (
           <Control key={field.key} field={field} value={edits[field.key]} onChange={set} />
         ))}
-        <h2>Color</h2>
+        <h2 className="my-[5px] mb-2 text-xs text-white/64">Color</h2>
         {fields.slice(8).map((field) => (
           <Control key={field.key} field={field} value={edits[field.key]} onChange={set} />
         ))}
       </div>
-      <footer className="edit-footer">
-        <button onClick={() => onSave({ ...edits, rotation })}>Save Edited Copy</button>
+      <footer className="flex min-h-12 shrink-0 items-center justify-end border-t border-sky-200/16 bg-[#181818] px-3 py-2">
+        {statusMessage && <span className="mr-auto text-[8px] text-emerald-400">{statusMessage}</span>}
+        <button className="cursor-pointer rounded-full border-0 bg-[#f1f1f1] px-1.5 py-1 text-[8px] font-semibold tracking-[-.02em] text-[#181818] hover:bg-white" onClick={() => onSave({ ...edits, rotation })}>Save Edited Copy</button>
       </footer>
     </motion.section>
   )
@@ -320,9 +332,10 @@ function Control({
   onChange: (key: keyof Edits, value: number) => void
 }): React.JSX.Element {
   return (
-    <label className="edit-control">
+    <label className="my-1 grid grid-cols-[105px_1fr_34px_18px] items-center gap-2 text-[10px]">
       <span>{field.label}</span>
       <input
+        className="w-full accent-[#f1f1f1]"
         type="range"
         min={field.min}
         max={field.max}
@@ -330,12 +343,16 @@ function Control({
         value={value}
         onChange={(event) => onChange(field.key, Number(event.target.value))}
       />
-      <output>
+      <output className="text-right text-[11px] text-white/64">
         {value > 0 ? '+' : ''}
         {value}
         {field.unit ?? ''}
       </output>
-      <button onClick={() => onChange(field.key, 0)} aria-label={`Reset ${field.label}`}>
+      <button
+        className="cursor-pointer border-0 bg-transparent text-white hover:bg-[#252525]"
+        onClick={() => onChange(field.key, 0)}
+        aria-label={`Reset ${field.label}`}
+      >
         ↻
       </button>
     </label>
