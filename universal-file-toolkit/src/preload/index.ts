@@ -78,6 +78,8 @@ const api = Object.freeze({
     tint: number
     gamma: number
   }) => ipcRenderer.invoke('conversion:image-edit', payload) as Promise<{ outputPath: string }>,
+  removeBackground: (payload: { inputPath: string; operation: 'remove-background' }) =>
+    ipcRenderer.invoke('conversion:image-remove-background', payload) as Promise<{ outputPath: string }>,
   onRadialMenuOpened: (listener: () => void): (() => void) => {
     const handler = (): void => listener()
     ipcRenderer.on('radial-menu:opened', handler)

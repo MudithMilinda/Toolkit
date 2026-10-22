@@ -65,6 +65,7 @@ const imageToolOperations = entries([
   ['metadata', 'Metadata'],
   ['edit', 'Edit'],
   ['crop', 'Crop'],
+  ['remove-background', 'Remove BG'],
   ['send-email', 'Send Email']
 ])
 

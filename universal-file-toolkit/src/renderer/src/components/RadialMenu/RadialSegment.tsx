@@ -2,6 +2,7 @@ import type { DragEvent } from 'react'
 import type { FileOperation } from '../../utils/fileFormats'
 import {
   Archive,
+  Eraser,
   FileOutput,
   Image,
   Info,
@@ -117,6 +118,8 @@ export default function RadialSegment({
         ? Mail
         : operation.id === 'edit'
           ? SlidersHorizontal
+        : operation.id === 'remove-background'
+          ? Eraser
           : operation.id === 'crop' || operation.id === 'trim'
             ? Scissors
             : operation.id === 'metadata'

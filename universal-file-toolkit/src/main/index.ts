@@ -4,7 +4,6 @@ import {
   globalShortcut,
   ipcMain,
   Menu,
-  Notification,
   screen,
   shell,
   Tray
@@ -21,6 +20,7 @@ import { createNativeIntegration } from './native-integration'
 import { ConversionManager } from './services/conversion/ConversionManager'
 import type {
   ImageCompressionRequest,
+  ImageBackgroundRemovalRequest,
   ImageCropRequest,
   ImageEditRequest,
   ImageConversionRequest,
@@ -179,6 +179,11 @@ function isImageEditRequest(value: unknown): value is ImageEditRequest {
       'gamma'
     ].every((key) => typeof candidate[key] === 'number' && Number.isFinite(candidate[key]))
   )
+}
+function isImageBackgroundRemovalRequest(value: unknown): value is ImageBackgroundRemovalRequest {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return hasSafeInputPath(candidate) && candidate.operation === 'remove-background'
 }
 
 function showRadialMenu(focus = true): void {
@@ -347,25 +352,11 @@ app.whenReady().then(() => {
   })
   ipcMain.handle('conversion:image', async (_, payload: unknown) => {
     if (!isImageConversionRequest(payload)) throw new Error('Invalid image conversion request.')
-    const result = await conversionManager.convertImage(payload)
-    if (Notification.isSupported()) {
-      new Notification({
-        title: 'Conversion Complete',
-        body: `${result.inputPath.split(/[\\/]/).pop()} converted to ${result.outputPath.split(/[\\/]/).pop()}.`
-      }).show()
-    }
-    return result
+    return conversionManager.convertImage(payload)
   })
   ipcMain.handle('conversion:images-to-pdf', async (_, payload: unknown) => {
     if (!isImagesToPdfRequest(payload)) throw new Error('Invalid PDF conversion request.')
-    const result = await conversionManager.convertImagesToPdf(payload)
-    if (Notification.isSupported()) {
-      new Notification({
-        title: 'PDF Created',
-        body: `${payload.inputPaths.length} image${payload.inputPaths.length === 1 ? '' : 's'} saved as ${result.outputPath.split(/[\\/]/).pop()}.`
-      }).show()
-    }
-    return result
+    return conversionManager.convertImagesToPdf(payload)
   })
   ipcMain.handle('conversion:image-resize', async (_, payload: unknown) => {
     if (!isImageResizeRequest(payload)) throw new Error('Invalid image resize request.')
@@ -382,6 +373,11 @@ app.whenReady().then(() => {
   ipcMain.handle('conversion:image-edit', async (_, payload: unknown) => {
     if (!isImageEditRequest(payload)) throw new Error('Invalid image edit request.')
     return conversionManager.editImage(payload)
+  })
+  ipcMain.handle('conversion:image-remove-background', async (_, payload: unknown) => {
+    if (!isImageBackgroundRemovalRequest(payload))
+      throw new Error('Invalid background removal request.')
+    return conversionManager.removeBackground(payload)
   })
   ipcMain.handle('image:preview', async (_, inputPath: unknown) => {
     if (typeof inputPath !== 'string' || !isAbsolute(inputPath))

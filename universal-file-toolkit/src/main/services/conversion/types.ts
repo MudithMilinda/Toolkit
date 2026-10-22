@@ -64,6 +64,10 @@ export interface ImageEditRequest {
   tint: number
   gamma: number
 }
+export interface ImageBackgroundRemovalRequest {
+  inputPath: string
+  operation: 'remove-background'
+}
 
 export interface ConversionResult {
   id: string

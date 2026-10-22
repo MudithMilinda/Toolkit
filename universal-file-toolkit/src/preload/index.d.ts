@@ -65,6 +65,10 @@ declare global {
         tint: number
         gamma: number
       }) => Promise<{ outputPath: string }>
+      removeBackground: (payload: {
+        inputPath: string
+        operation: 'remove-background'
+      }) => Promise<{ outputPath: string }>
       onRadialMenuOpened: (listener: () => void) => () => void
       onRadialMenuModifier: (listener: (modifier: 'shift' | 'command') => void) => () => void
       onSettingsRequested: (listener: () => void) => () => void

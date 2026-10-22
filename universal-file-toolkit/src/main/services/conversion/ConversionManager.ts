@@ -7,6 +7,7 @@ import { ImageConverter } from './converters/ImageConverter'
 import { OutputManager } from './OutputManager'
 import type {
   ConversionResult,
+  ImageBackgroundRemovalRequest,
   ImageCompressionRequest,
   ImageCropRequest,
   ImageEditRequest,
@@ -57,6 +58,11 @@ export class ConversionManager {
     return this.startJob(
       `${resolve(request.inputPath)}:edit:${Object.values(request).join(':')}`,
       () => this.performEdit(request)
+    )
+  }
+  removeBackground(request: ImageBackgroundRemovalRequest): Promise<ConversionResult> {
+    return this.startJob(`${resolve(request.inputPath)}:remove-background`, () =>
+      this.performBackgroundRemoval(request)
     )
   }
 
@@ -250,6 +256,35 @@ export class ConversionManager {
         outputPath,
         normalizedSource,
         targetFormat,
+        source.size,
+        output.size,
+        startedAt
+      )
+    } catch (error) {
+      await this.outputManager.discardTemporaryFile(temporaryPath)
+      throw error
+    }
+  }
+  private async performBackgroundRemoval(
+    request: ImageBackgroundRemovalRequest
+  ): Promise<ConversionResult> {
+    const { inputPath, source, normalizedSource } = await this.prepareInput(request.inputPath)
+    const startedAt = Date.now()
+    const temporaryPath = await this.outputManager.createTemporaryPath(inputPath)
+    try {
+      await this.imageConverter.removeBackground(inputPath, temporaryPath)
+      const outputPath = await this.outputManager.publishTemporaryFile(
+        temporaryPath,
+        inputPath,
+        'png',
+        '-no-background'
+      )
+      const output = await stat(outputPath)
+      return this.result(
+        inputPath,
+        outputPath,
+        normalizedSource,
+        'png',
         source.size,
         output.size,
         startedAt

@@ -1,7 +1,9 @@
 import sharp, { type Sharp } from 'sharp'
+import { app } from 'electron'
 import { writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { platform } from 'node:process'
+import { join } from 'node:path'
 import { promisify } from 'node:util'
 import type { ImageConversionOptions, ImageTargetFormat } from '../types'
 import type { ImageCompressionRequest, ImageEditRequest } from '../types'
@@ -181,6 +183,16 @@ export class ImageConverter {
       await pipeline.jpeg({ quality: 90, mozjpeg: true }).toFile(outputPath)
     } else if (targetFormat === 'webp') await pipeline.webp({ quality: 85 }).toFile(outputPath)
     else await pipeline.png({ compressionLevel: 9 }).toFile(outputPath)
+  }
+
+  /** Uses macOS Vision's foreground instance mask to preserve the image subject. */
+  async removeBackground(inputPath: string, outputPath: string): Promise<void> {
+    if (platform !== 'darwin')
+      throw new Error('Background removal is currently available on macOS only.')
+    const helperPath = app.isPackaged
+      ? join(process.resourcesPath, 'native', 'background-removal')
+      : join(app.getAppPath(), 'native', 'macos', 'bin', 'background-removal')
+    await execFileAsync(helperPath, [inputPath, outputPath])
   }
 
   supportsOutput(target: ImageTargetFormat): boolean {

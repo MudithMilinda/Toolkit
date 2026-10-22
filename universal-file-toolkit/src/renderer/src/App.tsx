@@ -85,6 +85,26 @@ function App(): React.JSX.Element {
         setOptionsMode(nextOperation.id)
         return
       }
+      if (nextOperation.id === 'remove-background') {
+        const inputPath = window.api.getPathForFile(selectedFile)
+        if (!inputPath) {
+          setNotice('The dropped file path could not be read. Please drop the file again.')
+          return
+        }
+        setIsProcessing(true)
+        setIsClosing(true)
+        setNotice(`Removing the background from ${selectedFile.name}…`)
+        window.setTimeout(() => void window.api.closeRadialMenu(), 220)
+        void window.api
+          .removeBackground({ inputPath, operation: 'remove-background' })
+          .then((result) => setNotice(`Background removed — ${result.outputPath.split(/[\\/]/).pop()}.`))
+          .catch((error: unknown) => {
+            setIsClosing(false)
+            setNotice(error instanceof Error ? error.message : 'Background removal failed.')
+          })
+          .finally(() => setIsProcessing(false))
+        return
+      }
       if (
         !['png', 'jpg', 'webp', 'pdf', 'heic', 'tiff', 'avif', 'bmp'].includes(nextOperation.id)
       ) {
