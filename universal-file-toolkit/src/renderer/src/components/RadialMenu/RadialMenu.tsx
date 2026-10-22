@@ -13,8 +13,9 @@ interface Props {
   activeModifier?: 'shift' | 'command'
   selectedOperation: FileOperation | null
   isDragging?: boolean
+  processingProgress?: number | 'finalizing' | null
   onSelect: (operation: FileOperation) => void
-  onDirectFileDrop?: (files: File[], operation: FileOperation) => void
+  onDirectFileDrop?: (files: File[], index: number) => void
   onDismiss: () => void
 }
 
@@ -25,6 +26,7 @@ export default function RadialMenu({
   activeModifier,
   selectedOperation,
   isDragging = false,
+  processingProgress = null,
   onSelect,
   onDirectFileDrop,
   onDismiss
@@ -63,17 +65,27 @@ export default function RadialMenu({
   const category = file ? getFileCategory(file.name) : 'image'
   const hoveredOperation = hovered !== null ? operations[hovered] : null
   const centerLabel =
-    isDragging && hoveredOperation
-      ? hoveredOperation.label
-      : file
-        ? getFileExtension(file.name).toUpperCase()
-        : 'DROP FILE'
+    processingProgress !== null
+      ? processingProgress === 'finalizing'
+        ? 'Finalizing'
+        : processingProgress >= 100
+          ? 'Done'
+          : 'Converting'
+      : isDragging && hoveredOperation
+        ? hoveredOperation.label
+        : file
+          ? getFileExtension(file.name).toUpperCase()
+          : 'DROP FILE'
   const centerSubLabel =
-    isDragging && hoveredOperation
-      ? `release to convert as ${hoveredOperation.label.toLowerCase()}`
-      : file
-        ? category
-        : 'ready to convert'
+    processingProgress !== null
+      ? processingProgress === 'finalizing'
+        ? 'almost there…'
+        : `${processingProgress}%`
+      : isDragging && hoveredOperation
+        ? 'release to convert'
+        : file
+          ? category
+          : 'ready to convert'
 
   if (file && !convertOperations.length) {
     return (
@@ -101,7 +113,7 @@ export default function RadialMenu({
             selected={selectedOperation?.id === operation.id}
             onHover={() => setHovered(index)}
             onSelect={() => selectIndex(index)}
-            onFileDrop={(droppedFiles) => onDirectFileDrop?.(droppedFiles, operation)}
+            onFileDrop={(droppedFiles) => onDirectFileDrop?.(droppedFiles, index)}
           />
         ))}
       </svg>

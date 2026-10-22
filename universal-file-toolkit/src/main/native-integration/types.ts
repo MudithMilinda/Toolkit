@@ -12,7 +12,7 @@ export interface NativeIntegration {
 }
 
 export interface NativeIntegrationCallbacks {
-  onModifierDragCandidate(modifier: 'shift' | 'command'): void
+  onModifierDragCandidate(modifier: 'shift' | 'command', fileName?: string): void
   onModifierChanged(modifier: 'shift' | 'command'): void
   onOutsideClick(point: { x: number; y: number }): void
   onGestureEnded(): void

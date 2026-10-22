@@ -11,11 +11,14 @@ files:
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
 asarUnpack:
   - resources/**
+  - node_modules/ffmpeg-static/**
 extraResources:
   - from: native/macos/bin/shift-drag-monitor
     to: native/shift-drag-monitor
   - from: native/macos/bin/background-removal
     to: native/background-removal
+  - from: native/macos/bin/video-converter
+    to: native/video-converter
 win:
   executableName: universal-file-toolkit
 nsis:

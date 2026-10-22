@@ -20,11 +20,22 @@ function App(): React.JSX.Element {
   const [isClosing, setIsClosing] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const [panelStatus, setPanelStatus] = useState<string | null>(null)
+  const [conversionProgress, setConversionProgress] = useState<number | 'finalizing' | null>(null)
   const [isProcessing, setIsProcessing] = useState(false)
   const [dragModifier, setDragModifier] = useState<'shift' | 'command'>('shift')
+  const [draggedFileName, setDraggedFileName] = useState<string | null>(null)
   const [optionsMode, setOptionsMode] = useState<
     'resize' | 'compress' | 'crop' | 'edit' | 'metadata' | null
   >(null)
+  useEffect(
+    () =>
+      window.api.onVideoConversionProgress((percent) => {
+        setConversionProgress((current) =>
+          typeof current === 'number' && percent > current ? percent : current
+        )
+      }),
+    []
+  )
   const handleOperation = useCallback(
     (nextOperation: FileOperation, selectedFile: File | null = file) => {
       if (!selectedFile) {
@@ -97,10 +108,65 @@ function App(): React.JSX.Element {
         window.setTimeout(() => void window.api.closeRadialMenu(), 220)
         void window.api
           .removeBackground({ inputPath, operation: 'remove-background' })
-          .then((result) => setNotice(`Background removed — ${result.outputPath.split(/[\\/]/).pop()}.`))
+          .then((result) =>
+            setNotice(`Background removed — ${result.outputPath.split(/[\\/]/).pop()}.`)
+          )
           .catch((error: unknown) => {
             setIsClosing(false)
             setNotice(error instanceof Error ? error.message : 'Background removal failed.')
+          })
+          .finally(() => setIsProcessing(false))
+        return
+      }
+      if (['mp4', 'mov', 'mp3', 'gif', 'webm', 'mkv', 'avi'].includes(nextOperation.id)) {
+        const inputPath = window.api.getPathForFile(selectedFile)
+        if (!inputPath) {
+          setNotice('The dropped file path could not be read. Please drop the file again.')
+          return
+        }
+        const targetFormat: 'mp4' | 'mov' | 'mp3' | 'gif' | 'webm' | 'mkv' | 'avi' =
+          nextOperation.id === 'mp4'
+            ? 'mp4'
+            : nextOperation.id === 'mov'
+              ? 'mov'
+              : nextOperation.id === 'mp3'
+                ? 'mp3'
+                : nextOperation.id === 'gif'
+                  ? 'gif'
+                  : nextOperation.id === 'webm'
+                    ? 'webm'
+                    : nextOperation.id === 'mkv'
+                      ? 'mkv'
+                      : 'avi'
+        setIsProcessing(true)
+        setConversionProgress(0)
+        let progress = 0
+        const reportsFrameProgress = ['webm', 'mkv', 'avi', 'mp3'].includes(targetFormat)
+        const progressTimer = reportsFrameProgress
+          ? undefined
+          : window.setInterval(() => {
+              // Native export does not provide frame-level progress. Keep its
+              // estimate below 100%; only a completed export reaches 100%.
+              if (progress >= 95) {
+                setConversionProgress('finalizing')
+                return
+              }
+              progress = Math.min(95, progress + Math.max(1, Math.round((95 - progress) / 7)))
+              setConversionProgress(progress)
+            }, 350)
+        void window.api
+          .convertVideo({ inputPath, targetFormat })
+          .then((result) => {
+            if (progressTimer) window.clearInterval(progressTimer)
+            setConversionProgress(100)
+            setNotice(`Conversion successful — ${result.outputPath.split(/[\\/]/).pop()}.`)
+            window.setTimeout(() => void window.api.closeRadialMenu(), 1000)
+          })
+          .catch((error: unknown) => {
+            if (progressTimer) window.clearInterval(progressTimer)
+            setConversionProgress(null)
+            const message = error instanceof Error ? error.message : 'Video conversion failed.'
+            setNotice(message.replace(/^Error invoking remote method '[^']+': Error: /, ''))
           })
           .finally(() => setIsProcessing(false))
         return
@@ -187,12 +253,15 @@ function App(): React.JSX.Element {
     setOperation(null)
     setNotice(null)
     setPanelStatus(null)
+    setConversionProgress(null)
     setOptionsMode(null)
     setIsClosing(false)
     setDragModifier('shift')
+    setDraggedFileName(null)
   }, [reset])
   useEffect(() => window.api.onRadialMenuOpened(resetMenu), [resetMenu])
   useEffect(() => window.api.onRadialMenuModifier(setDragModifier), [])
+  useEffect(() => window.api.onRadialMenuDragFile(setDraggedFileName), [])
   useEffect(
     () =>
       window.api.onSettingsRequested(() => {
@@ -200,13 +269,16 @@ function App(): React.JSX.Element {
       }),
     []
   )
-  const operationFileName = file?.name ?? 'sample.png'
+  const operationFileName = file?.name ?? draggedFileName ?? 'sample.png'
   const convertOperations = getOperationsForFile(operationFileName)
   const toolOperations = getFileToolOperations(operationFileName)
 
   return (
     <AppLayout>
-      <section className="relative z-1 grid size-full place-items-center" aria-label="Universal File Toolkit">
+      <section
+        className="relative z-1 grid size-full place-items-center"
+        aria-label="Universal File Toolkit"
+      >
         <DropZone
           dragHandlers={dragHandlers}
           isDragging={!optionsMode && isDragging}
@@ -227,11 +299,26 @@ function App(): React.JSX.Element {
                   toolOperations={toolOperations}
                   activeModifier={dragModifier}
                   isDragging={isDragging}
+                  processingProgress={conversionProgress}
                   selectedOperation={operation}
                   onSelect={isProcessing ? () => undefined : handleOperation}
-                  onDirectFileDrop={(droppedFiles, nextOperation) => {
+                  onDirectFileDrop={(droppedFiles, index) => {
                     window.api.notifyDropReceived()
-                    loadFile(droppedFiles[0])
+                    const droppedFile = droppedFiles[0]
+                    if (!droppedFile) return
+                    loadFile(droppedFile)
+                    // The window can appear before macOS lets Chromium expose a
+                    // drag's file name. Resolve the target from the dropped file
+                    // rather than the image placeholder displayed beforehand.
+                    const droppedOperations =
+                      dragModifier === 'command'
+                        ? getFileToolOperations(droppedFile.name)
+                        : getOperationsForFile(droppedFile.name)
+                    const nextOperation = droppedOperations[index]
+                    if (!nextOperation) {
+                      setNotice('That action is not available for this file type.')
+                      return
+                    }
                     if (nextOperation.id === 'pdf' && droppedFiles.length > 1) {
                       const inputPaths = droppedFiles
                         .map((droppedFile) => window.api.getPathForFile(droppedFile))
@@ -262,8 +349,8 @@ function App(): React.JSX.Element {
                         .finally(() => setIsProcessing(false))
                       return
                     }
-                    droppedFiles.forEach((droppedFile) =>
-                      handleOperation(nextOperation, droppedFile)
+                    droppedFiles.forEach((fileToConvert) =>
+                      handleOperation(nextOperation, fileToConvert)
                     )
                   }}
                   onDismiss={dismiss}
@@ -345,7 +432,7 @@ function App(): React.JSX.Element {
       <AnimatePresence>
         {notice && (
           <motion.p
-            className="absolute bottom-6 z-5 m-0 max-w-[260px] rounded-full border border-cyan-300/25 bg-[#071421]/82 px-2.5 py-1.5 text-center text-[9px] text-cyan-100 backdrop-blur-[12px]"
+            className="absolute top-[calc(50%+158px)] z-5 m-0 max-w-[228px] rounded-full border border-white/15 bg-[#171719]/92 px-3 py-1.5 text-center text-[9px] leading-[1.35] text-zinc-200 shadow-[0_7px_18px_rgba(0,0,0,0.3)] backdrop-blur-[18px]"
             initial={{ opacity: 0, y: 5 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}

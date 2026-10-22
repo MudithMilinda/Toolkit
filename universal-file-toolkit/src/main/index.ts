@@ -1,13 +1,4 @@
-import {
-  app,
-  BrowserWindow,
-  globalShortcut,
-  ipcMain,
-  Menu,
-  screen,
-  shell,
-  Tray
-} from 'electron'
+import { app, BrowserWindow, globalShortcut, ipcMain, Menu, screen, shell, Tray } from 'electron'
 import { execFile } from 'node:child_process'
 import { basename, join } from 'path'
 import { readFile, stat } from 'node:fs/promises'
@@ -25,7 +16,8 @@ import type {
   ImageEditRequest,
   ImageConversionRequest,
   ImagesToPdfRequest,
-  ImageResizeRequest
+  ImageResizeRequest,
+  VideoConversionRequest
 } from './services/conversion/types'
 
 let radialWindow: BrowserWindow | null = null
@@ -53,6 +45,14 @@ function isImageConversionRequest(value: unknown): value is ImageConversionReque
       String(candidate.targetFormat)
     ) &&
     (candidate.options === undefined || typeof candidate.options === 'object')
+  )
+}
+function isVideoConversionRequest(value: unknown): value is VideoConversionRequest {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return (
+    hasSafeInputPath(candidate) &&
+    ['mp4', 'mov', 'mp3', 'gif', 'webm', 'mkv', 'avi'].includes(String(candidate.targetFormat))
   )
 }
 
@@ -209,12 +209,13 @@ function showRadialMenu(focus = true): void {
   radialWindow.webContents.send('radial-menu:opened')
 }
 
-function showNativeDragCandidate(modifier: 'shift' | 'command'): void {
+function showNativeDragCandidate(modifier: 'shift' | 'command', fileName?: string): void {
   if (nativeDismissTimer) clearTimeout(nativeDismissTimer)
   nativeDragCandidateVisible = true
   // Experimental: a newly shown window may not join a Finder drag already in progress.
   showRadialMenu(false)
   radialWindow?.webContents.send('radial-menu:modifier', modifier)
+  if (fileName) radialWindow?.webContents.send('radial-menu:drag-file', fileName)
 }
 
 function showSettings(): void {
@@ -353,6 +354,12 @@ app.whenReady().then(() => {
   ipcMain.handle('conversion:image', async (_, payload: unknown) => {
     if (!isImageConversionRequest(payload)) throw new Error('Invalid image conversion request.')
     return conversionManager.convertImage(payload)
+  })
+  ipcMain.handle('conversion:video', async (event, payload: unknown) => {
+    if (!isVideoConversionRequest(payload)) throw new Error('Invalid video conversion request.')
+    return conversionManager.convertVideo(payload, (percent) =>
+      event.sender.send('conversion:video-progress', percent)
+    )
   })
   ipcMain.handle('conversion:images-to-pdf', async (_, payload: unknown) => {
     if (!isImagesToPdfRequest(payload)) throw new Error('Invalid PDF conversion request.')

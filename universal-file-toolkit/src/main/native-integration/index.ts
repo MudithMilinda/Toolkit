@@ -22,6 +22,7 @@ type HelperMessage = {
   type:
     'modifier-drag-candidate' | 'modifier-changed' | 'outside-click' | 'gesture-ended' | 'status'
   modifier?: 'shift' | 'command'
+  fileName?: string
   x?: number
   y?: number
   accessibility?: boolean
@@ -110,7 +111,7 @@ class MacShiftDragIntegration implements NativeIntegration {
       callbacks.onStatus?.(this.currentStatus)
     }
     if (message.type === 'modifier-drag-candidate' && message.modifier)
-      callbacks.onModifierDragCandidate(message.modifier)
+      callbacks.onModifierDragCandidate(message.modifier, message.fileName)
     if (message.type === 'modifier-changed' && message.modifier)
       callbacks.onModifierChanged(message.modifier)
     if (

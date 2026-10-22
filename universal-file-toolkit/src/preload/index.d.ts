@@ -16,6 +16,16 @@ declare global {
         outputSize: number
         savedPercent: number
       }>
+      convertVideo: (payload: {
+        inputPath: string
+        targetFormat: 'mp4' | 'mov' | 'mp3' | 'gif' | 'webm' | 'mkv' | 'avi'
+      }) => Promise<{
+        outputPath: string
+        originalSize: number
+        outputSize: number
+        savedPercent: number
+      }>
+      onVideoConversionProgress: (listener: (percent: number) => void) => () => void
       convertImagesToPdf: (payload: { inputPaths: string[] }) => Promise<{
         outputPath: string
         originalSize: number
@@ -71,6 +81,7 @@ declare global {
       }) => Promise<{ outputPath: string }>
       onRadialMenuOpened: (listener: () => void) => () => void
       onRadialMenuModifier: (listener: (modifier: 'shift' | 'command') => void) => () => void
+      onRadialMenuDragFile: (listener: (fileName: string) => void) => () => void
       onSettingsRequested: (listener: () => void) => () => void
     }
   }

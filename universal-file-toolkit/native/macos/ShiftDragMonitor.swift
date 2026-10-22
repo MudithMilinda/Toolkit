@@ -2,8 +2,8 @@ import ApplicationServices
 import AppKit
 import Foundation
 
-/// A minimal, event-driven helper. It checks only the public pasteboard type declaration
-/// to distinguish Finder file drags from ordinary modifier drags; it never reads file URLs.
+/// A minimal, event-driven helper. It exposes only the dragged file's display name so the
+/// radial menu can choose a matching set of actions before the file is dropped.
 final class ShiftDragMonitor {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -102,7 +102,9 @@ final class ShiftDragMonitor {
             if !gestureActive {
                 gestureActive = true
                 activeModifier = modifier
-                emit(["type": "modifier-drag-candidate", "modifier": modifier])
+                var message: [String: Any] = ["type": "modifier-drag-candidate", "modifier": modifier]
+                if let fileName = draggedFileName() { message["fileName"] = fileName }
+                emit(message)
             } else if activeModifier != modifier {
                 activeModifier = modifier
                 emit(["type": "modifier-changed", "modifier": modifier])
@@ -128,6 +130,13 @@ final class ShiftDragMonitor {
         return types.contains(.fileURL) || types.contains { type in
             type.rawValue == "NSFilenamesPboardType"
         }
+    }
+
+    private func draggedFileName() -> String? {
+        let pasteboard = NSPasteboard(name: .drag)
+        let options: [NSPasteboard.ReadingOptionKey: Any] = [.urlReadingFileURLsOnly: true]
+        return (pasteboard.readObjects(forClasses: [NSURL.self], options: options) as? [URL])?
+            .first?.lastPathComponent
     }
 
     private func emit(_ value: [String: Any]) {

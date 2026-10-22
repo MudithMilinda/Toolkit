@@ -26,11 +26,12 @@ const operationMap: Record<FileCategory, FileOperation[]> = {
   ]),
   video: entries([
     ['mp4', 'MP4'],
+    ['mp3', 'MP3'],
+    ['gif', 'GIF'],
+    ['mov', 'MOV'],
     ['webm', 'WEBM'],
-    ['audio', 'Extract audio'],
-    ['trim', 'Trim'],
-    ['compress', 'Compress'],
-    ['metadata', 'Metadata']
+    ['mkv', 'MKV'],
+    ['avi', 'AVI']
   ]),
   audio: entries([
     ['mp3', 'MP3'],
@@ -70,7 +71,7 @@ const imageToolOperations = entries([
 ])
 
 export const getFileToolOperations = (filename: string): FileOperation[] =>
-  getFileCategory(filename) === 'image' ? imageToolOperations : getOperationsForFile(filename)
+  getFileCategory(filename) === 'image' ? imageToolOperations : []
 export const formatFileSize = (bytes: number): string =>
   bytes < 1024
     ? `${bytes} B`

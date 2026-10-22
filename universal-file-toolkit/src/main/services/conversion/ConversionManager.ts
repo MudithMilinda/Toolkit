@@ -1,9 +1,13 @@
 import { stat } from 'node:fs/promises'
 import type { Stats } from 'node:fs'
-import { isAbsolute, resolve } from 'node:path'
+import { isAbsolute, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { app } from 'electron'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import sharp from 'sharp'
 import { ImageConverter } from './converters/ImageConverter'
+import { FfmpegVideoConverter } from './converters/FfmpegVideoConverter'
 import { OutputManager } from './OutputManager'
 import type {
   ConversionResult,
@@ -14,14 +18,17 @@ import type {
   ImageConversionRequest,
   ImagesToPdfRequest,
   ImageResizeRequest,
-  ImageTargetFormat
+  ImageTargetFormat,
+  VideoConversionRequest
 } from './types'
 
 const MAX_IMAGE_BYTES = 512 * 1024 * 1024
+const execFileAsync = promisify(execFile)
 
 /** Main-process-only image conversion coordinator. Duplicate jobs share one promise. */
 export class ConversionManager {
   private readonly imageConverter = new ImageConverter()
+  private readonly ffmpegVideoConverter = new FfmpegVideoConverter()
   private readonly outputManager = new OutputManager()
   private readonly activeJobs = new Map<string, Promise<ConversionResult>>()
 
@@ -32,6 +39,15 @@ export class ConversionManager {
     const job = this.performImageConversion(request).finally(() => this.activeJobs.delete(key))
     this.activeJobs.set(key, job)
     return job
+  }
+
+  convertVideo(
+    request: VideoConversionRequest,
+    onProgress?: (percent: number) => void
+  ): Promise<ConversionResult> {
+    return this.startJob(`${resolve(request.inputPath)}:video:${request.targetFormat}`, () =>
+      this.performVideoConversion(request, onProgress)
+    )
   }
 
   convertImagesToPdf(request: ImagesToPdfRequest): Promise<ConversionResult> {
@@ -103,6 +119,64 @@ export class ConversionManager {
     } catch (error) {
       await this.outputManager.discardTemporaryFile(temporaryPath)
       throw error
+    }
+  }
+
+  private async performVideoConversion(
+    request: VideoConversionRequest,
+    onProgress?: (percent: number) => void
+  ): Promise<ConversionResult> {
+    const { inputPath, source, normalizedSource } = await this.prepareMediaInput(request.inputPath)
+    if (normalizedSource === request.targetFormat) {
+      throw new Error(`This video is already ${request.targetFormat.toUpperCase()}.`)
+    }
+    if (process.platform !== 'darwin')
+      throw new Error('Video conversion is currently available on macOS.')
+    const startedAt = Date.now()
+    const temporaryPath = `${await this.outputManager.createTemporaryPath(inputPath)}.${request.targetFormat}`
+    const helperPath = app.isPackaged
+      ? join(process.resourcesPath, 'native', 'video-converter')
+      : join(app.getAppPath(), 'native', 'macos', 'bin', 'video-converter')
+    try {
+      if (['webm', 'mkv', 'avi', 'mp3'].includes(request.targetFormat)) {
+        await this.ffmpegVideoConverter.convert(
+          inputPath,
+          temporaryPath,
+          request.targetFormat as 'webm' | 'mkv' | 'avi' | 'mp3',
+          onProgress
+        )
+      } else {
+        await execFileAsync(helperPath, [inputPath, temporaryPath, request.targetFormat])
+      }
+      const outputPath = await this.outputManager.publishTemporaryFile(
+        temporaryPath,
+        inputPath,
+        request.targetFormat,
+        request.targetFormat === 'mp3'
+          ? '-audio'
+          : request.targetFormat === 'gif'
+            ? '-animated'
+            : '-converted'
+      )
+      const output = await stat(outputPath)
+      return this.result(
+        inputPath,
+        outputPath,
+        normalizedSource,
+        request.targetFormat,
+        source.size,
+        output.size,
+        startedAt
+      )
+    } catch (error) {
+      await this.outputManager.discardTemporaryFile(temporaryPath)
+      const target = request.targetFormat.toUpperCase()
+      const detail = error instanceof Error ? error.message : ''
+      throw new Error(
+        request.targetFormat === 'mp3'
+          ? 'Unable to extract MP3 audio from this video.'
+          : detail || `Unable to convert this video to ${target}.`
+      )
     }
   }
 
@@ -331,6 +405,24 @@ export class ConversionManager {
     }
   }
 
+  private async prepareMediaInput(inputPathValue: string): Promise<{
+    inputPath: string
+    source: Stats
+    normalizedSource: string
+  }> {
+    if (!isAbsolute(inputPathValue)) throw new Error('The input file path must be absolute.')
+    const inputPath = resolve(inputPathValue)
+    const source = await stat(inputPath)
+    if (!source.isFile()) throw new Error('The selected input is not a regular file.')
+    if (source.size === 0) throw new Error('The selected video is empty.')
+    if (source.size > 4 * 1024 * 1024 * 1024)
+      throw new Error('The selected video exceeds the 4 GB safety limit.')
+    const extension = inputPath.split('.').pop()?.toLowerCase()
+    if (!extension || !['mp4', 'mov', 'webm'].includes(extension))
+      throw new Error('Unsupported video format.')
+    return { inputPath, source, normalizedSource: extension }
+  }
+
   private editTargetFormat(sourceFormat: string): ImageTargetFormat {
     return sourceFormat === 'jpg' || sourceFormat === 'png' || sourceFormat === 'webp'
       ? sourceFormat
@@ -341,7 +433,7 @@ export class ConversionManager {
     inputPath: string,
     outputPath: string,
     sourceFormat: string,
-    targetFormat: ImageTargetFormat,
+    targetFormat: ImageTargetFormat | 'mp4' | 'mov' | 'mp3' | 'gif' | 'webm' | 'mkv' | 'avi',
     originalSize: number,
     outputSize: number,
     startedAt: number

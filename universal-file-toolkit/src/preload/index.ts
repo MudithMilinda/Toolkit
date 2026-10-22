@@ -23,6 +23,21 @@ const api = Object.freeze({
       outputSize: number
       savedPercent: number
     }>,
+  convertVideo: (payload: {
+    inputPath: string
+    targetFormat: 'mp4' | 'mov' | 'mp3' | 'gif' | 'webm' | 'mkv' | 'avi'
+  }) =>
+    ipcRenderer.invoke('conversion:video', payload) as Promise<{
+      outputPath: string
+      originalSize: number
+      outputSize: number
+      savedPercent: number
+    }>,
+  onVideoConversionProgress: (listener: (percent: number) => void): (() => void) => {
+    const handler = (_: Electron.IpcRendererEvent, percent: number): void => listener(percent)
+    ipcRenderer.on('conversion:video-progress', handler)
+    return () => ipcRenderer.removeListener('conversion:video-progress', handler)
+  },
   convertImagesToPdf: (payload: { inputPaths: string[] }) =>
     ipcRenderer.invoke('conversion:images-to-pdf', payload) as Promise<{
       outputPath: string
@@ -79,7 +94,9 @@ const api = Object.freeze({
     gamma: number
   }) => ipcRenderer.invoke('conversion:image-edit', payload) as Promise<{ outputPath: string }>,
   removeBackground: (payload: { inputPath: string; operation: 'remove-background' }) =>
-    ipcRenderer.invoke('conversion:image-remove-background', payload) as Promise<{ outputPath: string }>,
+    ipcRenderer.invoke('conversion:image-remove-background', payload) as Promise<{
+      outputPath: string
+    }>,
   onRadialMenuOpened: (listener: () => void): (() => void) => {
     const handler = (): void => listener()
     ipcRenderer.on('radial-menu:opened', handler)
@@ -90,6 +107,11 @@ const api = Object.freeze({
       listener(modifier)
     ipcRenderer.on('radial-menu:modifier', handler)
     return () => ipcRenderer.removeListener('radial-menu:modifier', handler)
+  },
+  onRadialMenuDragFile: (listener: (fileName: string) => void): (() => void) => {
+    const handler = (_: Electron.IpcRendererEvent, fileName: string): void => listener(fileName)
+    ipcRenderer.on('radial-menu:drag-file', handler)
+    return () => ipcRenderer.removeListener('radial-menu:drag-file', handler)
   },
   onSettingsRequested: (listener: () => void): (() => void) => {
     const handler = (): void => listener()

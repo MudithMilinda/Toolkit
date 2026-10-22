@@ -111,6 +111,7 @@ export default function RadialSegment({
 }: Props): React.JSX.Element {
   const labelAngle = radians(-90 + index * (360 / total))
   const [x, y] = circlePoint((R_IN + R_OUT) / 2 + 3, labelAngle)
+  const labelLines = [operation.label]
   const Icon =
     operation.id === 'compress'
       ? Archive
@@ -169,11 +170,15 @@ export default function RadialSegment({
       <text
         className="radial-label"
         x={x}
-        y={y + 11}
+        y={y + (labelLines.length > 1 ? 7 : 11)}
         textAnchor="middle"
         dominantBaseline="central"
       >
-        {operation.label}
+        {labelLines.map((line, lineIndex) => (
+          <tspan key={line} x={x} dy={lineIndex === 0 ? 0 : 8}>
+            {line}
+          </tspan>
+        ))}
       </text>
     </motion.g>
   )

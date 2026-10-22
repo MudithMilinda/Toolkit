@@ -27,9 +27,14 @@ export function useFileDrop(): {
     event.preventDefault()
     if (hasFiles(event)) {
       depth.current += 1
+      // Chromium exposes the file name during a legitimate in-window drag.
+      // Use it only to choose the matching radial actions; the actual file is
+      // still accepted exclusively on drop.
+      const previewFile = event.dataTransfer.files?.[0]
+      if (previewFile?.name) loadFile(previewFile)
       setIsDragging(true)
     }
-  }, [])
+  }, [loadFile])
   const onDragLeave = useCallback((event: DragEvent<HTMLElement>) => {
     event.preventDefault()
     if (hasFiles(event)) {

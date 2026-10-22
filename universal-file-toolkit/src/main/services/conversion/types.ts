@@ -1,6 +1,7 @@
 export type ConversionStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled'
 
 export type ImageTargetFormat = 'png' | 'jpg' | 'webp' | 'pdf' | 'heic' | 'tiff' | 'avif' | 'bmp'
+export type VideoTargetFormat = 'mp4' | 'mov' | 'mp3' | 'gif' | 'webm' | 'mkv' | 'avi'
 
 export interface ImageConversionOptions {
   /** Preserve EXIF/XMP/ICC metadata only when the user explicitly asks for it. */
@@ -15,6 +16,10 @@ export interface ImageConversionRequest {
   inputPath: string
   targetFormat: ImageTargetFormat
   options?: ImageConversionOptions
+}
+export interface VideoConversionRequest {
+  inputPath: string
+  targetFormat: VideoTargetFormat
 }
 
 /** Creates one PDF page per input image, in the order supplied. */
@@ -75,7 +80,7 @@ export interface ConversionResult {
   inputPath: string
   outputPath: string
   sourceFormat: string
-  targetFormat: ImageTargetFormat
+  targetFormat: ImageTargetFormat | VideoTargetFormat
   originalSize: number
   outputSize: number
   savedPercent: number

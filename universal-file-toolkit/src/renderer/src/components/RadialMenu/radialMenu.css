@@ -122,11 +122,18 @@ body,
   filter: none;
 }
 .radial-center span {
+  max-width: 78px;
+  overflow-wrap: anywhere;
+  text-align: center;
+  line-height: 1.1;
   font-size: 8px;
   font-weight: 800;
   letter-spacing: 0.08em;
 }
 .radial-center small {
+  max-width: 72px;
+  text-align: center;
+  line-height: 1.2;
   color: rgba(225, 225, 230, 0.66);
   font-size: 6px;
   text-transform: uppercase;
