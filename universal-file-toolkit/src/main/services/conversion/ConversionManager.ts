@@ -1,6 +1,6 @@
-import { stat } from 'node:fs/promises'
+import { readFile, rm, stat } from 'node:fs/promises'
 import type { Stats } from 'node:fs'
-import { isAbsolute, join, resolve } from 'node:path'
+import { basename, isAbsolute, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
 import { execFile } from 'node:child_process'
@@ -19,6 +19,10 @@ import type {
   ImagesToPdfRequest,
   ImageResizeRequest,
   ImageTargetFormat,
+  VideoCompressionRequest,
+  VideoCropRequest,
+  VideoSpeedRequest,
+  VideoTrimRequest,
   VideoConversionRequest
 } from './types'
 
@@ -47,6 +51,88 @@ export class ConversionManager {
   ): Promise<ConversionResult> {
     return this.startJob(`${resolve(request.inputPath)}:video:${request.targetFormat}`, () =>
       this.performVideoConversion(request, onProgress)
+    )
+  }
+
+  compressVideo(
+    request: VideoCompressionRequest,
+    onProgress?: (percent: number) => void
+  ): Promise<ConversionResult> {
+    return this.startJob(
+      `${resolve(request.inputPath)}:video-compress:${request.quality}:${request.maxDimension ?? ''}`,
+      () => this.performVideoCompression(request, onProgress)
+    )
+  }
+
+  async getVideoMetadata(inputPathValue: string): Promise<Array<{ key: string; value: string }>> {
+    const { inputPath } = await this.prepareMediaInput(inputPathValue)
+    return this.ffmpegVideoConverter.inspect(inputPath)
+  }
+
+  async createVideoPreview(inputPathValue: string): Promise<string> {
+    const { inputPath } = await this.prepareMediaInput(inputPathValue)
+    const previewPath = join(
+      app.getPath('temp'),
+      `${randomUUID()}.universal-file-toolkit-preview.mp4`
+    )
+    await this.ffmpegVideoConverter.createPreview(inputPath, previewPath)
+    return previewPath
+  }
+
+  async createVideoPoster(inputPathValue: string): Promise<string> {
+    const { inputPath } = await this.prepareMediaInput(inputPathValue)
+    const posterPath = join(
+      app.getPath('temp'),
+      `${randomUUID()}.universal-file-toolkit-poster.jpg`
+    )
+    try {
+      await this.ffmpegVideoConverter.createPoster(inputPath, posterPath)
+      const bytes = await readFile(posterPath)
+      return `data:image/jpeg;base64,${bytes.toString('base64')}`
+    } finally {
+      await rm(posterPath, { force: true }).catch(() => undefined)
+    }
+  }
+
+  trimVideo(
+    request: VideoTrimRequest,
+    onProgress?: (percent: number) => void
+  ): Promise<ConversionResult> {
+    return this.startJob(
+      `${resolve(request.inputPath)}:video-trim:${request.startSeconds}:${request.endSeconds}`,
+      () => this.performVideoTrim(request, onProgress)
+    )
+  }
+
+  cropVideo(
+    request: VideoCropRequest,
+    onProgress?: (percent: number) => void
+  ): Promise<ConversionResult> {
+    return this.startJob(
+      `${resolve(request.inputPath)}:video-crop:${request.left},${request.top},${request.width},${request.height}`,
+      () => this.performVideoCrop(request, onProgress)
+    )
+  }
+
+  changeVideoSpeed(
+    request: VideoSpeedRequest,
+    onProgress?: (percent: number) => void
+  ): Promise<ConversionResult> {
+    return this.startJob(`${resolve(request.inputPath)}:video-speed:${request.speed}`, () =>
+      this.performVideoSpeed(request, onProgress)
+    )
+  }
+
+  muteVideo(inputPath: string, onProgress?: (percent: number) => void): Promise<ConversionResult> {
+    return this.startJob(`${resolve(inputPath)}:video-mute`, () =>
+      this.performVideoMute(inputPath, onProgress)
+    )
+  }
+
+  archiveFiles(inputPaths: string[]): Promise<ConversionResult> {
+    return this.startJob(
+      `${inputPaths.map((inputPath) => resolve(inputPath)).join(':')}:archive:zip`,
+      () => this.performZipArchive(inputPaths)
     )
   }
 
@@ -177,6 +263,231 @@ export class ConversionManager {
           ? 'Unable to extract MP3 audio from this video.'
           : detail || `Unable to convert this video to ${target}.`
       )
+    }
+  }
+
+  private async performVideoCompression(
+    request: VideoCompressionRequest,
+    onProgress?: (percent: number) => void
+  ): Promise<ConversionResult> {
+    const { inputPath, source, normalizedSource } = await this.prepareMediaInput(request.inputPath)
+    const startedAt = Date.now()
+    const temporaryPath = `${await this.outputManager.createTemporaryPath(inputPath)}.mp4`
+    try {
+      await this.ffmpegVideoConverter.compress(
+        inputPath,
+        temporaryPath,
+        request.quality,
+        request.maxDimension,
+        onProgress
+      )
+      const outputPath = await this.outputManager.publishTemporaryFile(
+        temporaryPath,
+        inputPath,
+        'mp4',
+        '-compressed'
+      )
+      const output = await stat(outputPath)
+      return this.result(
+        inputPath,
+        outputPath,
+        normalizedSource,
+        'mp4',
+        source.size,
+        output.size,
+        startedAt
+      )
+    } catch (error) {
+      await this.outputManager.discardTemporaryFile(temporaryPath)
+      const detail = error instanceof Error ? error.message : ''
+      throw new Error(detail || 'Unable to compress this video.')
+    }
+  }
+
+  private async performVideoMute(
+    inputPathValue: string,
+    onProgress?: (percent: number) => void
+  ): Promise<ConversionResult> {
+    const { inputPath, source, normalizedSource } = await this.prepareMediaInput(inputPathValue)
+    const startedAt = Date.now()
+    const temporaryPath = `${await this.outputManager.createTemporaryPath(inputPath)}.mp4`
+    try {
+      await this.ffmpegVideoConverter.mute(inputPath, temporaryPath, onProgress)
+      const outputPath = await this.outputManager.publishTemporaryFile(
+        temporaryPath,
+        inputPath,
+        'mp4',
+        '-muted'
+      )
+      const output = await stat(outputPath)
+      return this.result(
+        inputPath,
+        outputPath,
+        normalizedSource,
+        'mp4',
+        source.size,
+        output.size,
+        startedAt
+      )
+    } catch (error) {
+      await this.outputManager.discardTemporaryFile(temporaryPath)
+      const detail = error instanceof Error ? error.message : ''
+      throw new Error(detail || 'Unable to mute this video.')
+    }
+  }
+
+  private async performVideoTrim(
+    request: VideoTrimRequest,
+    onProgress?: (percent: number) => void
+  ): Promise<ConversionResult> {
+    const { inputPath, source, normalizedSource } = await this.prepareMediaInput(request.inputPath)
+    const startedAt = Date.now()
+    const temporaryPath = `${await this.outputManager.createTemporaryPath(inputPath)}.mp4`
+    try {
+      await this.ffmpegVideoConverter.trim(
+        inputPath,
+        temporaryPath,
+        request.startSeconds,
+        request.endSeconds,
+        onProgress
+      )
+      const outputPath = await this.outputManager.publishTemporaryFile(
+        temporaryPath,
+        inputPath,
+        'mp4',
+        '-trimmed'
+      )
+      const output = await stat(outputPath)
+      return this.result(
+        inputPath,
+        outputPath,
+        normalizedSource,
+        'mp4',
+        source.size,
+        output.size,
+        startedAt
+      )
+    } catch (error) {
+      await this.outputManager.discardTemporaryFile(temporaryPath)
+      const detail = error instanceof Error ? error.message : ''
+      throw new Error(detail || 'Unable to trim this video.')
+    }
+  }
+
+  private async performVideoCrop(
+    request: VideoCropRequest,
+    onProgress?: (percent: number) => void
+  ): Promise<ConversionResult> {
+    const { inputPath, source, normalizedSource } = await this.prepareMediaInput(request.inputPath)
+    const startedAt = Date.now()
+    const temporaryPath = `${await this.outputManager.createTemporaryPath(inputPath)}.mp4`
+    try {
+      await this.ffmpegVideoConverter.crop(inputPath, temporaryPath, request, onProgress)
+      const outputPath = await this.outputManager.publishTemporaryFile(
+        temporaryPath,
+        inputPath,
+        'mp4',
+        '-cropped'
+      )
+      const output = await stat(outputPath)
+      return this.result(
+        inputPath,
+        outputPath,
+        normalizedSource,
+        'mp4',
+        source.size,
+        output.size,
+        startedAt
+      )
+    } catch (error) {
+      await this.outputManager.discardTemporaryFile(temporaryPath)
+      const detail = error instanceof Error ? error.message : ''
+      throw new Error(detail || 'Unable to crop this video.')
+    }
+  }
+
+  private async performVideoSpeed(
+    request: VideoSpeedRequest,
+    onProgress?: (percent: number) => void
+  ): Promise<ConversionResult> {
+    const { inputPath, source, normalizedSource } = await this.prepareMediaInput(request.inputPath)
+    const startedAt = Date.now()
+    const temporaryPath = `${await this.outputManager.createTemporaryPath(inputPath)}.mp4`
+    try {
+      await this.ffmpegVideoConverter.changeSpeed(
+        inputPath,
+        temporaryPath,
+        request.speed,
+        onProgress
+      )
+      const outputPath = await this.outputManager.publishTemporaryFile(
+        temporaryPath,
+        inputPath,
+        'mp4',
+        `-${request.speed}x`
+      )
+      const output = await stat(outputPath)
+      return this.result(
+        inputPath,
+        outputPath,
+        normalizedSource,
+        'mp4',
+        source.size,
+        output.size,
+        startedAt
+      )
+    } catch (error) {
+      await this.outputManager.discardTemporaryFile(temporaryPath)
+      const detail = error instanceof Error ? error.message : ''
+      throw new Error(detail || 'Unable to change this video speed.', { cause: error })
+    }
+  }
+
+  private async performZipArchive(inputPathValues: string[]): Promise<ConversionResult> {
+    if (!inputPathValues.length)
+      throw new Error('Select at least one file to create a ZIP archive.')
+    const inputs = await Promise.all(
+      inputPathValues.map((inputPath) => this.prepareArchiveInput(inputPath))
+    )
+    const firstInput = inputs[0]!
+    const names = inputs.map(({ inputPath }) => basename(inputPath).toLowerCase())
+    if (names.some((name, index) => names.indexOf(name) !== index))
+      throw new Error('Files with the same name cannot be added to one ZIP archive.')
+    if (process.platform !== 'darwin')
+      throw new Error('ZIP export is currently available on macOS.')
+    const startedAt = Date.now()
+    const temporaryPath = await this.outputManager.createTemporaryPath(firstInput.inputPath)
+    try {
+      // Store mode is fast for already-compressed media, while still creating
+      // a standard ZIP archive for every supported file type.
+      // -j stores only names, not local source paths, inside the archive.
+      await execFileAsync('/usr/bin/zip', [
+        '-0',
+        '-q',
+        '-j',
+        temporaryPath,
+        ...inputs.map(({ inputPath }) => inputPath)
+      ])
+      const outputPath = await this.outputManager.publishTemporaryFile(
+        temporaryPath,
+        firstInput.inputPath,
+        'zip',
+        '-archive'
+      )
+      const output = await stat(outputPath)
+      return this.result(
+        firstInput.inputPath,
+        outputPath,
+        firstInput.normalizedSource,
+        'zip',
+        inputs.reduce((total, { source }) => total + source.size, 0),
+        output.size,
+        startedAt
+      )
+    } catch (error) {
+      await this.outputManager.discardTemporaryFile(temporaryPath)
+      const detail = error instanceof Error ? error.message : ''
+      throw new Error(detail || 'Unable to create ZIP archive.')
     }
   }
 
@@ -418,9 +729,28 @@ export class ConversionManager {
     if (source.size > 4 * 1024 * 1024 * 1024)
       throw new Error('The selected video exceeds the 4 GB safety limit.')
     const extension = inputPath.split('.').pop()?.toLowerCase()
-    if (!extension || !['mp4', 'mov', 'webm'].includes(extension))
+    if (!extension || !['mp4', 'mov', 'webm', 'mkv', 'avi'].includes(extension))
       throw new Error('Unsupported video format.')
     return { inputPath, source, normalizedSource: extension }
+  }
+
+  private async prepareArchiveInput(inputPathValue: string): Promise<{
+    inputPath: string
+    source: Stats
+    normalizedSource: string
+  }> {
+    if (!isAbsolute(inputPathValue)) throw new Error('The input file path must be absolute.')
+    const inputPath = resolve(inputPathValue)
+    const source = await stat(inputPath)
+    if (!source.isFile()) throw new Error('The selected input is not a regular file.')
+    if (source.size === 0) throw new Error('The selected file is empty.')
+    if (source.size > 4 * 1024 * 1024 * 1024)
+      throw new Error('The selected file exceeds the 4 GB safety limit.')
+    return {
+      inputPath,
+      source,
+      normalizedSource: inputPath.split('.').pop()?.toLowerCase() ?? 'file'
+    }
   }
 
   private editTargetFormat(sourceFormat: string): ImageTargetFormat {
@@ -433,7 +763,8 @@ export class ConversionManager {
     inputPath: string,
     outputPath: string,
     sourceFormat: string,
-    targetFormat: ImageTargetFormat | 'mp4' | 'mov' | 'mp3' | 'gif' | 'webm' | 'mkv' | 'avi',
+    targetFormat:
+      ImageTargetFormat | 'mp4' | 'mov' | 'mp3' | 'gif' | 'webm' | 'mkv' | 'avi' | 'zip',
     originalSize: number,
     outputSize: number,
     startedAt: number

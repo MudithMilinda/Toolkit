@@ -53,16 +53,17 @@ export function getFileCategory(filename: string): FileCategory {
     return 'image'
   }
   if (ext === 'pdf') return 'document'
-  if (['mp4', 'mov', 'webm'].includes(ext)) return 'video'
+  if (['mp4', 'mov', 'webm', 'mkv', 'avi'].includes(ext)) return 'video'
   if (['mp3', 'wav', 'aac'].includes(ext)) return 'audio'
   return 'unknown'
 }
 export const getOperationsForFile = (filename: string): FileOperation[] =>
   operationMap[getFileCategory(filename)]
 
-/** Image-only actions, revealed while the Command key is held. */
+/** Actions revealed while Q is held during a file drag. */
 const imageToolOperations = entries([
   ['compress', 'Compress'],
+  ['zip', 'ZIP'],
   ['metadata', 'Metadata'],
   ['edit', 'Edit'],
   ['crop', 'Crop'],
@@ -70,8 +71,26 @@ const imageToolOperations = entries([
   ['send-email', 'Send Email']
 ])
 
+// Keep these IDs distinct from image operations. Several labels overlap (Crop,
+// Compress and Metadata), but the implementations and controls are different
+// for video files.
+const videoToolOperations = entries([
+  ['video-compress', 'Compress'],
+  ['zip', 'ZIP'],
+  ['video-metadata', 'Metadata'],
+  ['video-mute', 'Mute'],
+  ['video-trim', 'Trim'],
+  ['video-crop', 'Crop'],
+  ['video-speed', 'Speed'],
+  ['send-email', 'Send Email']
+])
+
 export const getFileToolOperations = (filename: string): FileOperation[] =>
-  getFileCategory(filename) === 'image' ? imageToolOperations : []
+  getFileCategory(filename) === 'image'
+    ? imageToolOperations
+    : getFileCategory(filename) === 'video'
+      ? videoToolOperations
+      : []
 export const formatFileSize = (bytes: number): string =>
   bytes < 1024
     ? `${bytes} B`

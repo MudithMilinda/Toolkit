@@ -2,14 +2,19 @@ import type { DragEvent } from 'react'
 import type { FileOperation } from '../../utils/fileFormats'
 import {
   Archive,
+  CaptionsOff,
+  Crop,
   Eraser,
   FileOutput,
   Image,
   Info,
   Mail,
   Music2,
+  PanelTop,
   Scissors,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Gauge,
+  VolumeX
 } from 'lucide-react'
 import { motion } from 'motion/react'
 
@@ -113,26 +118,40 @@ export default function RadialSegment({
   const [x, y] = circlePoint((R_IN + R_OUT) / 2 + 3, labelAngle)
   const labelLines = [operation.label]
   const Icon =
-    operation.id === 'compress'
+    operation.id === 'compress' || operation.id === 'video-compress' || operation.id === 'zip'
       ? Archive
       : operation.id === 'send-email'
         ? Mail
         : operation.id === 'edit'
           ? SlidersHorizontal
-        : operation.id === 'remove-background'
-          ? Eraser
-          : operation.id === 'crop' || operation.id === 'trim'
-            ? Scissors
-            : operation.id === 'metadata'
-              ? Info
-              : operation.id === 'audio' ||
-                  operation.id === 'mp3' ||
-                  operation.id === 'wav' ||
-                  operation.id === 'aac'
-                ? Music2
-                : operation.id === 'png' || operation.id === 'jpg' || operation.id === 'webp'
-                  ? Image
-                  : FileOutput
+          : operation.id === 'remove-background'
+            ? Eraser
+            : operation.id === 'crop' || operation.id === 'video-crop'
+              ? Crop
+              : operation.id === 'trim' || operation.id === 'video-trim'
+                ? Scissors
+                : operation.id === 'metadata' || operation.id === 'video-metadata'
+                  ? Info
+                  : operation.id === 'video-mute'
+                    ? VolumeX
+                    : operation.id === 'video-speed'
+                      ? Gauge
+                      : operation.id === 'video-snapshot'
+                        ? Image
+                        : operation.id === 'video-split'
+                          ? PanelTop
+                          : operation.id === 'video-redact'
+                            ? CaptionsOff
+                            : operation.id === 'audio' ||
+                                operation.id === 'mp3' ||
+                                operation.id === 'wav' ||
+                                operation.id === 'aac'
+                              ? Music2
+                              : operation.id === 'png' ||
+                                  operation.id === 'jpg' ||
+                                  operation.id === 'webp'
+                                ? Image
+                                : FileOutput
   return (
     <motion.g
       className="radial-segment-group"

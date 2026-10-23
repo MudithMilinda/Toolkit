@@ -25,6 +25,66 @@ declare global {
         outputSize: number
         savedPercent: number
       }>
+      compressVideo: (payload: {
+        inputPath: string
+        operation: 'video-compress'
+        quality: number
+        maxDimension?: number
+      }) => Promise<{
+        outputPath: string
+        originalSize: number
+        outputSize: number
+        savedPercent: number
+      }>
+      getVideoMetadata: (inputPath: string) => Promise<Array<{ key: string; value: string }>>
+      getVideoSourceUrl: (inputPath: string) => Promise<string>
+      getVideoPoster: (inputPath: string) => Promise<string>
+      muteVideo: (inputPath: string) => Promise<{
+        outputPath: string
+        originalSize: number
+        outputSize: number
+        savedPercent: number
+      }>
+      trimVideo: (payload: {
+        inputPath: string
+        operation: 'video-trim'
+        startSeconds: number
+        endSeconds: number
+      }) => Promise<{
+        outputPath: string
+        originalSize: number
+        outputSize: number
+        savedPercent: number
+      }>
+      cropVideo: (payload: {
+        inputPath: string
+        operation: 'video-crop'
+        left: number
+        top: number
+        width: number
+        height: number
+      }) => Promise<{
+        outputPath: string
+        originalSize: number
+        outputSize: number
+        savedPercent: number
+      }>
+      changeVideoSpeed: (payload: {
+        inputPath: string
+        operation: 'video-speed'
+        speed: number
+      }) => Promise<{
+        outputPath: string
+        originalSize: number
+        outputSize: number
+        savedPercent: number
+      }>
+      archiveFiles: (inputPaths: string[]) => Promise<{
+        outputPath: string
+        originalSize: number
+        outputSize: number
+        savedPercent: number
+      }>
       onVideoConversionProgress: (listener: (percent: number) => void) => () => void
       convertImagesToPdf: (payload: { inputPaths: string[] }) => Promise<{
         outputPath: string

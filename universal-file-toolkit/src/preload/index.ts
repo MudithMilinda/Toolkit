@@ -33,6 +33,73 @@ const api = Object.freeze({
       outputSize: number
       savedPercent: number
     }>,
+  compressVideo: (payload: {
+    inputPath: string
+    operation: 'video-compress'
+    quality: number
+    maxDimension?: number
+  }) =>
+    ipcRenderer.invoke('conversion:video-compress', payload) as Promise<{
+      outputPath: string
+      originalSize: number
+      outputSize: number
+      savedPercent: number
+    }>,
+  getVideoMetadata: (inputPath: string) =>
+    ipcRenderer.invoke('video:metadata', inputPath) as Promise<
+      Array<{ key: string; value: string }>
+    >,
+  getVideoSourceUrl: (inputPath: string) =>
+    ipcRenderer.invoke('video:source-url', inputPath) as Promise<string>,
+  getVideoPoster: (inputPath: string) =>
+    ipcRenderer.invoke('video:poster', inputPath) as Promise<string>,
+  muteVideo: (inputPath: string) =>
+    ipcRenderer.invoke('conversion:video-mute', inputPath) as Promise<{
+      outputPath: string
+      originalSize: number
+      outputSize: number
+      savedPercent: number
+    }>,
+  trimVideo: (payload: {
+    inputPath: string
+    operation: 'video-trim'
+    startSeconds: number
+    endSeconds: number
+  }) =>
+    ipcRenderer.invoke('conversion:video-trim', payload) as Promise<{
+      outputPath: string
+      originalSize: number
+      outputSize: number
+      savedPercent: number
+    }>,
+  cropVideo: (payload: {
+    inputPath: string
+    operation: 'video-crop'
+    left: number
+    top: number
+    width: number
+    height: number
+  }) =>
+    ipcRenderer.invoke('conversion:video-crop', payload) as Promise<{
+      outputPath: string
+      originalSize: number
+      outputSize: number
+      savedPercent: number
+    }>,
+  changeVideoSpeed: (payload: { inputPath: string; operation: 'video-speed'; speed: number }) =>
+    ipcRenderer.invoke('conversion:video-speed', payload) as Promise<{
+      outputPath: string
+      originalSize: number
+      outputSize: number
+      savedPercent: number
+    }>,
+  archiveFiles: (inputPaths: string[]) =>
+    ipcRenderer.invoke('conversion:archive', inputPaths) as Promise<{
+      outputPath: string
+      originalSize: number
+      outputSize: number
+      savedPercent: number
+    }>,
   onVideoConversionProgress: (listener: (percent: number) => void): (() => void) => {
     const handler = (_: Electron.IpcRendererEvent, percent: number): void => listener(percent)
     ipcRenderer.on('conversion:video-progress', handler)

@@ -4,6 +4,11 @@ import AppLayout from './components/AppLayout'
 import DropZone from './components/DropZone'
 import RadialMenu from './components/RadialMenu/RadialMenu'
 import ImageOptionsPanel from './components/ImageOptionsPanel'
+import VideoCompressPanel from './components/VideoCompressPanel'
+import VideoMetadataPanel from './components/VideoMetadataPanel'
+import VideoTrimPanel from './components/VideoTrimPanel'
+import VideoCropPanel from './components/VideoCropPanel'
+import VideoSpeedPanel from './components/VideoSpeedPanel'
 import ImageCropPanel from './components/ImageCropPanel'
 import ImageEditPanel from './components/ImageEditPanel'
 import ImageMetadataPanel from './components/ImageMetadataPanel'
@@ -25,7 +30,17 @@ function App(): React.JSX.Element {
   const [dragModifier, setDragModifier] = useState<'shift' | 'command'>('shift')
   const [draggedFileName, setDraggedFileName] = useState<string | null>(null)
   const [optionsMode, setOptionsMode] = useState<
-    'resize' | 'compress' | 'crop' | 'edit' | 'metadata' | null
+    | 'resize'
+    | 'compress'
+    | 'video-compress'
+    | 'video-metadata'
+    | 'video-trim'
+    | 'video-crop'
+    | 'video-speed'
+    | 'crop'
+    | 'edit'
+    | 'metadata'
+    | null
   >(null)
   useEffect(
     () =>
@@ -33,17 +48,118 @@ function App(): React.JSX.Element {
         setConversionProgress((current) =>
           typeof current === 'number' && percent > current ? percent : current
         )
+        if (
+          optionsMode === 'video-compress' ||
+          optionsMode === 'video-trim' ||
+          optionsMode === 'video-crop' ||
+          optionsMode === 'video-speed'
+        ) {
+          setPanelStatus(
+            `${optionsMode === 'video-trim' ? 'Trimming' : optionsMode === 'video-crop' ? 'Cropping' : optionsMode === 'video-speed' ? 'Changing speed of' : 'Compressing'} video… ${percent}%`
+          )
+        }
       }),
-    []
+    [optionsMode]
   )
   const handleOperation = useCallback(
-    (nextOperation: FileOperation, selectedFile: File | null = file) => {
+    (nextOperation: FileOperation, selectedFile: File | null = file, selectedFiles?: File[]) => {
       if (!selectedFile) {
         setNotice('Drop a file into the center first.')
         return
       }
       clearDragging()
       setOperation(nextOperation)
+      if (nextOperation.id === 'zip') {
+        const filesToArchive = selectedFiles ?? (selectedFile === file ? files : [selectedFile])
+        const inputPaths = filesToArchive
+          .map((video) => window.api.getPathForFile(video))
+          .filter((inputPath): inputPath is string => Boolean(inputPath))
+        if (inputPaths.length !== filesToArchive.length) {
+          setNotice(
+            'One or more dropped video paths could not be read. Please drop the files again.'
+          )
+          return
+        }
+        setIsProcessing(true)
+        setConversionProgress(0)
+        setNotice(null)
+        let progress = 0
+        const progressTimer = window.setInterval(() => {
+          // macOS's ZIP utility does not report per-file progress. Keep an
+          // estimate below 100%; a completed archive is the only true 100%.
+          if (progress >= 95) {
+            setConversionProgress('finalizing')
+            return
+          }
+          progress = Math.min(95, progress + Math.max(1, Math.round((95 - progress) / 7)))
+          setConversionProgress(progress)
+        }, 350)
+        void window.api
+          .archiveFiles(inputPaths)
+          .then(() => {
+            window.clearInterval(progressTimer)
+            setConversionProgress(100)
+            window.setTimeout(() => void window.api.closeRadialMenu(), 1000)
+          })
+          .catch((error: unknown) => {
+            window.clearInterval(progressTimer)
+            setConversionProgress(null)
+            setNotice(error instanceof Error ? error.message : 'Unable to create ZIP archive.')
+          })
+          .finally(() => setIsProcessing(false))
+        return
+      }
+      if (nextOperation.id.startsWith('video-')) {
+        if (nextOperation.id === 'video-compress') {
+          setPanelStatus(null)
+          setOptionsMode('video-compress')
+          return
+        }
+        if (nextOperation.id === 'video-metadata') {
+          setOptionsMode('video-metadata')
+          return
+        }
+        if (nextOperation.id === 'video-mute') {
+          const inputPath = window.api.getPathForFile(selectedFile)
+          if (!inputPath) {
+            setNotice('The video path could not be read. Please drop the file again.')
+            return
+          }
+          setIsProcessing(true)
+          setConversionProgress(0)
+          setNotice(`Muting ${selectedFile.name}…`)
+          void window.api
+            .muteVideo(inputPath)
+            .then((result) => {
+              setConversionProgress(100)
+              setNotice(`Muted video created — ${result.outputPath.split(/[\\/]/).pop()}.`)
+              window.setTimeout(() => void window.api.closeRadialMenu(), 1000)
+            })
+            .catch((error: unknown) => {
+              setConversionProgress(null)
+              setNotice(error instanceof Error ? error.message : 'Unable to mute this video.')
+            })
+            .finally(() => setIsProcessing(false))
+          return
+        }
+        if (nextOperation.id === 'video-trim') {
+          setPanelStatus(null)
+          setOptionsMode('video-trim')
+          return
+        }
+        if (nextOperation.id === 'video-crop') {
+          setPanelStatus(null)
+          setOptionsMode('video-crop')
+          return
+        }
+        if (nextOperation.id === 'video-speed') {
+          setPanelStatus(null)
+          setOptionsMode('video-speed')
+          return
+        }
+        setNotice(`${nextOperation.label} for video is not available yet.`)
+        return
+      }
       if (nextOperation.id === 'send-email') {
         const inputPath = window.api.getPathForFile(selectedFile)
         if (!inputPath) {
@@ -244,10 +360,120 @@ function App(): React.JSX.Element {
     },
     [file]
   )
+  const runVideoCompress = useCallback(
+    (payload: { quality: number; maxDimension?: number }) => {
+      if (!file) return
+      const inputPath = window.api.getPathForFile(file)
+      if (!inputPath) {
+        setPanelStatus('The video path could not be read. Please drop the file again.')
+        return
+      }
+      setIsProcessing(true)
+      setConversionProgress(0)
+      setPanelStatus('Compressing video… 0%')
+      void window.api
+        .compressVideo({ inputPath, operation: 'video-compress', ...payload })
+        .then((result) => {
+          setConversionProgress(100)
+          setPanelStatus(`100% complete — ${result.outputPath.split(/[\\/]/).pop()}`)
+          window.setTimeout(() => void window.api.closeRadialMenu(), 1400)
+        })
+        .catch((error: unknown) => {
+          setConversionProgress(null)
+          setPanelStatus(error instanceof Error ? error.message : 'Video compression failed.')
+        })
+        .finally(() => setIsProcessing(false))
+    },
+    [file]
+  )
+  const runVideoTrim = useCallback(
+    (range: { startSeconds: number; endSeconds: number }) => {
+      if (!file) return
+      const inputPath = window.api.getPathForFile(file)
+      if (!inputPath) {
+        setPanelStatus('The video path could not be read. Please drop the file again.')
+        return
+      }
+      setIsProcessing(true)
+      setConversionProgress(0)
+      setPanelStatus('Trimming video… 0%')
+      void window.api
+        .trimVideo({ inputPath, operation: 'video-trim', ...range })
+        .then((result) => {
+          setConversionProgress(100)
+          setPanelStatus(`100% complete — ${result.outputPath.split(/[\\/]/).pop()}`)
+          window.setTimeout(() => void window.api.closeRadialMenu(), 1400)
+        })
+        .catch((error: unknown) => {
+          setConversionProgress(null)
+          setPanelStatus(error instanceof Error ? error.message : 'Video trim failed.')
+        })
+        .finally(() => setIsProcessing(false))
+    },
+    [file]
+  )
+  const runVideoCrop = useCallback(
+    (area: { left: number; top: number; width: number; height: number }) => {
+      if (!file) return
+      const inputPath = window.api.getPathForFile(file)
+      if (!inputPath) {
+        setPanelStatus('The video path could not be read. Please drop the file again.')
+        return
+      }
+      setIsProcessing(true)
+      setConversionProgress(0)
+      setPanelStatus('Cropping video… 0%')
+      void window.api
+        .cropVideo({ inputPath, operation: 'video-crop', ...area })
+        .then((result) => {
+          setConversionProgress(100)
+          setPanelStatus(`100% complete — ${result.outputPath.split(/[\\/]/).pop()}`)
+          window.setTimeout(() => void window.api.closeRadialMenu(), 1400)
+        })
+        .catch((error: unknown) => {
+          setConversionProgress(null)
+          setPanelStatus(error instanceof Error ? error.message : 'Video crop failed.')
+        })
+        .finally(() => setIsProcessing(false))
+    },
+    [file]
+  )
+  const runVideoSpeed = useCallback(
+    (speed: number) => {
+      if (!file) return
+      const inputPath = window.api.getPathForFile(file)
+      if (!inputPath) {
+        setPanelStatus('The video path could not be read. Please drop the file again.')
+        return
+      }
+      setIsProcessing(true)
+      setConversionProgress(0)
+      setPanelStatus('Changing video speed… 0%')
+      void window.api
+        .changeVideoSpeed({ inputPath, operation: 'video-speed', speed })
+        .then((result) => {
+          setConversionProgress(100)
+          setPanelStatus(`100% complete — ${result.outputPath.split(/[\\/]/).pop()}`)
+          window.setTimeout(() => void window.api.closeRadialMenu(), 1400)
+        })
+        .catch((error: unknown) => {
+          setConversionProgress(null)
+          setPanelStatus(error instanceof Error ? error.message : 'Unable to change video speed.')
+        })
+        .finally(() => setIsProcessing(false))
+    },
+    [file]
+  )
   const dismiss = useCallback((): void => {
     setIsClosing(true)
     window.setTimeout(() => void window.api.closeRadialMenu(), 160)
   }, [])
+  const closeEditor = useCallback((): void => {
+    setPanelStatus(null)
+    setOperation(null)
+    setOptionsMode(null)
+    dismiss()
+  }, [dismiss])
   const resetMenu = useCallback((): void => {
     reset()
     setOperation(null)
@@ -260,6 +486,20 @@ function App(): React.JSX.Element {
     setDraggedFileName(null)
   }, [reset])
   useEffect(() => window.api.onRadialMenuOpened(resetMenu), [resetMenu])
+  useEffect(() => {
+    // The floating window is hidden as soon as Finder regains focus. Clear
+    // the previous editor while it is hidden so a Q-drag never flashes that
+    // stale panel before the fresh radial wheel is rendered.
+    const clearHiddenPanel = (): void => {
+      setOptionsMode(null)
+      setOperation(null)
+      setPanelStatus(null)
+      setConversionProgress(null)
+      setIsClosing(true)
+    }
+    window.addEventListener('blur', clearHiddenPanel)
+    return () => window.removeEventListener('blur', clearHiddenPanel)
+  }, [])
   useEffect(() => window.api.onRadialMenuModifier(setDragModifier), [])
   useEffect(() => window.api.onRadialMenuDragFile(setDraggedFileName), [])
   useEffect(
@@ -286,13 +526,7 @@ function App(): React.JSX.Element {
         >
           <AnimatePresence>
             {!isClosing && !optionsMode && (
-              <motion.div
-                className="grid size-full place-items-center"
-                initial={{ opacity: 0, scale: 0.82 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.82 }}
-                transition={{ type: 'spring', damping: 22, stiffness: 300 }}
-              >
+              <div className="grid size-full place-items-center">
                 <RadialMenu
                   file={file}
                   convertOperations={convertOperations}
@@ -349,35 +583,71 @@ function App(): React.JSX.Element {
                         .finally(() => setIsProcessing(false))
                       return
                     }
+                    if (nextOperation.id === 'zip') {
+                      handleOperation(nextOperation, droppedFile, droppedFiles)
+                      return
+                    }
                     droppedFiles.forEach((fileToConvert) =>
                       handleOperation(nextOperation, fileToConvert)
                     )
                   }}
                   onDismiss={dismiss}
                 />
-              </motion.div>
+              </div>
             )}
             {(optionsMode === 'resize' || optionsMode === 'compress') && file && (
               <ImageOptionsPanel
                 mode={optionsMode}
                 file={file}
                 statusMessage={panelStatus}
-                onCancel={() => {
-                  setPanelStatus(null)
-                  setOptionsMode(null)
-                }}
+                onCancel={closeEditor}
                 onResize={(payload) => runEdit('resize', { ...payload, operation: 'resize' })}
                 onCompress={(payload) => runEdit('compress', payload)}
+              />
+            )}
+            {optionsMode === 'video-compress' && file && !isClosing && (
+              <VideoCompressPanel
+                file={file}
+                statusMessage={panelStatus}
+                onCancel={closeEditor}
+                onCompress={runVideoCompress}
+              />
+            )}
+            {optionsMode === 'video-metadata' && file && !isClosing && (
+              <VideoMetadataPanel file={file} onCancel={closeEditor} />
+            )}
+            {optionsMode === 'video-trim' && file && !isClosing && (
+              <VideoTrimPanel
+                file={file}
+                statusMessage={panelStatus}
+                onCancel={closeEditor}
+                onApply={runVideoTrim}
+              />
+            )}
+            {optionsMode === 'video-crop' && file && !isClosing && (
+              <VideoCropPanel
+                key={`${file.name}-${file.lastModified}-${file.size}`}
+                file={file}
+                isProcessing={isProcessing}
+                statusMessage={panelStatus}
+                onCancel={closeEditor}
+                onApply={runVideoCrop}
+              />
+            )}
+            {optionsMode === 'video-speed' && file && !isClosing && (
+              <VideoSpeedPanel
+                key={`${file.name}-${file.lastModified}-${file.size}`}
+                file={file}
+                statusMessage={panelStatus}
+                onCancel={closeEditor}
+                onApply={runVideoSpeed}
               />
             )}
             {optionsMode === 'crop' && file && !isClosing && (
               <ImageCropPanel
                 file={file}
                 statusMessage={panelStatus}
-                onCancel={() => {
-                  setPanelStatus(null)
-                  setOptionsMode(null)
-                }}
+                onCancel={closeEditor}
                 onNewFile={resetMenu}
                 isProcessing={isProcessing}
                 onApply={(area) => {
@@ -402,10 +672,7 @@ function App(): React.JSX.Element {
               <ImageEditPanel
                 file={file}
                 statusMessage={panelStatus}
-                onCancel={() => {
-                  setPanelStatus(null)
-                  setOptionsMode(null)
-                }}
+                onCancel={closeEditor}
                 onSave={(edits) => {
                   const inputPath = window.api.getPathForFile(file)
                   setIsProcessing(true)
@@ -424,7 +691,7 @@ function App(): React.JSX.Element {
               />
             )}
             {optionsMode === 'metadata' && file && !isClosing && (
-              <ImageMetadataPanel file={file} onCancel={() => setOptionsMode(null)} />
+              <ImageMetadataPanel file={file} onCancel={closeEditor} />
             )}
           </AnimatePresence>
         </DropZone>

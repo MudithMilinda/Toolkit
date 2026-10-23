@@ -2,6 +2,7 @@ export type ConversionStatus = 'queued' | 'processing' | 'completed' | 'failed' 
 
 export type ImageTargetFormat = 'png' | 'jpg' | 'webp' | 'pdf' | 'heic' | 'tiff' | 'avif' | 'bmp'
 export type VideoTargetFormat = 'mp4' | 'mov' | 'mp3' | 'gif' | 'webm' | 'mkv' | 'avi'
+export type ArchiveTargetFormat = 'zip'
 
 export interface ImageConversionOptions {
   /** Preserve EXIF/XMP/ICC metadata only when the user explicitly asks for it. */
@@ -20,6 +21,32 @@ export interface ImageConversionRequest {
 export interface VideoConversionRequest {
   inputPath: string
   targetFormat: VideoTargetFormat
+}
+export interface VideoCompressionRequest {
+  inputPath: string
+  operation: 'video-compress'
+  quality: number
+  /** Longest output edge, preserving the video's aspect ratio. */
+  maxDimension?: number
+}
+export interface VideoTrimRequest {
+  inputPath: string
+  operation: 'video-trim'
+  startSeconds: number
+  endSeconds: number
+}
+export interface VideoCropRequest {
+  inputPath: string
+  operation: 'video-crop'
+  left: number
+  top: number
+  width: number
+  height: number
+}
+export interface VideoSpeedRequest {
+  inputPath: string
+  operation: 'video-speed'
+  speed: number
 }
 
 /** Creates one PDF page per input image, in the order supplied. */
@@ -80,7 +107,7 @@ export interface ConversionResult {
   inputPath: string
   outputPath: string
   sourceFormat: string
-  targetFormat: ImageTargetFormat | VideoTargetFormat
+  targetFormat: ImageTargetFormat | VideoTargetFormat | ArchiveTargetFormat
   originalSize: number
   outputSize: number
   savedPercent: number

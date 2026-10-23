@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { MinusCircle, Search, X } from 'lucide-react'
+import { Search, X } from 'lucide-react'
 import { motion } from 'motion/react'
 
 type Item = { key: string; value: string }
@@ -31,18 +31,20 @@ export default function ImageMetadataPanel({
   const fileItems = filtered.filter((item) => !imageItems.includes(item))
   const section = (title: string, rows: Item[]): React.JSX.Element => (
     <section>
-      <h2 className="mt-[17px] mb-[6px] border-t border-sky-200/16 pt-[9px] text-[11px] text-white/64">{title}</h2>
+      <h2 className="mt-[17px] mb-[6px] border-t border-sky-200/16 pt-[9px] text-[11px] text-white/64">
+        {title}
+      </h2>
       {rows.map((item) => (
-        <div className="grid grid-cols-[130px_1fr_21px] items-center gap-[9px] py-[5px] text-[11px]" key={item.key}>
+        <div
+          className="grid grid-cols-[130px_1fr] items-center gap-[9px] py-[5px] text-[11px]"
+          key={item.key}
+        >
           <strong>{item.key}:</strong>
-          <input className="min-w-0 rounded-[7px] border-0 bg-[#252525] px-[7px] py-[5px] text-[#f5f5f5]" value={item.value} readOnly />
-          <button
-            className="cursor-pointer border-0 bg-transparent text-white hover:bg-[#252525]"
-            title={`Remove ${item.key}`}
-            onClick={() => setItems((current) => current.filter((row) => row.key !== item.key))}
-          >
-            <MinusCircle size={18} />
-          </button>
+          <input
+            className="min-w-0 rounded-[7px] border-0 bg-[#252525] px-[7px] py-[5px] text-[#f5f5f5]"
+            value={item.value}
+            readOnly
+          />
         </div>
       ))}
     </section>
@@ -81,9 +83,12 @@ export default function ImageMetadataPanel({
         {section('File', fileItems)}
       </div>
       <footer className="flex shrink-0 items-center justify-end gap-[9px] border-t border-sky-200/16 px-[15px] py-2.5">
-        <p className="m-0 flex-1 text-[9px] text-white/64">Remove All clears camera and processing metadata from the saved copy.</p>
-        <button className="cursor-pointer rounded-full border-0 bg-[#f1f1f1] px-1.5 py-1 text-[8px] text-[#181818] hover:bg-white" onClick={() => setItems([])}>Remove All</button>
-        <button className="cursor-pointer rounded-full border-0 bg-[#f1f1f1] px-1.5 py-1 text-[8px] text-[#181818] hover:bg-white">Save</button>
+        <button
+          className="cursor-pointer rounded-full border-0 bg-[#f1f1f1] px-1.5 py-1 text-[8px] text-[#181818] hover:bg-white"
+          onClick={onCancel}
+        >
+          Close
+        </button>
       </footer>
     </motion.section>
   )

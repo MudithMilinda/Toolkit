@@ -1,4 +1,5 @@
 import { execFile, spawn } from 'node:child_process'
+import { rename, rm } from 'node:fs/promises'
 import { promisify } from 'node:util'
 import ffmpegPath from 'ffmpeg-static'
 
@@ -6,6 +7,491 @@ const execFileAsync = promisify(execFile)
 
 /** FFmpeg-backed formats that macOS AVFoundation cannot encode. */
 export class FfmpegVideoConverter {
+  async createPoster(inputPath: string, outputPath: string): Promise<void> {
+    await this.writeAtomically(outputPath, (target) => this.encodePoster(inputPath, target))
+  }
+
+  async createPreview(inputPath: string, outputPath: string): Promise<void> {
+    await this.writeAtomically(outputPath, (target) => this.encodePreview(inputPath, target))
+  }
+
+  private async encodePoster(inputPath: string, outputPath: string): Promise<void> {
+    if (!ffmpegPath) throw new Error('The bundled FFmpeg binary is unavailable for this computer.')
+    // FFmpeg auto-rotates by default (phone videos with rotation metadata come out upright),
+    // so no manual transpose / -noautorotate is needed here.
+    await this.runWithProgress(
+      [
+        '-ss',
+        '0.1',
+        '-i',
+        inputPath,
+        '-frames:v',
+        '1',
+        '-vf',
+        this.previewFilters(),
+        '-q:v',
+        '4',
+        '-y',
+        outputPath
+      ],
+      null
+    )
+  }
+
+  private async encodePreview(inputPath: string, outputPath: string): Promise<void> {
+    if (!ffmpegPath) throw new Error('The bundled FFmpeg binary is unavailable for this computer.')
+    const info = await this.probe(inputPath)
+    const streams = ['-map', '0:v:0?', '-map', '0:a:0?', '-sn', '-dn']
+    const audio = info.audio === 'aac' ? ['-c:a', 'copy'] : ['-c:a', 'aac', '-b:a', '96k']
+    const output = ['-movflags', '+faststart', '-y', outputPath]
+
+    // 1) Fastest path: browser-friendly H.264 only needs re-wrapping into MP4 (no re-encode).
+    //    Rotation metadata is kept, so Chromium shows portrait videos upright.
+    if (info.video === 'h264' && info.yuv420p) {
+      try {
+        await this.runWithProgress(
+          ['-i', inputPath, ...streams, '-c:v', 'copy', ...audio, ...output],
+          null
+        )
+        return
+      } catch {
+        // fall through to a real transcode
+      }
+    }
+
+    // 2) Other codecs (HEVC, ProRes, VP9, ...): small preview transcode.
+    //    On macOS try the hardware encoder first (many times faster than libx264).
+    const filters = this.previewFilters(true)
+    if (process.platform === 'darwin') {
+      try {
+        await this.runWithProgress(
+          [
+            '-hwaccel',
+            'videotoolbox',
+            '-i',
+            inputPath,
+            ...streams,
+            '-vf',
+            filters,
+            '-c:v',
+            'h264_videotoolbox',
+            '-b:v',
+            '2M',
+            '-pix_fmt',
+            'yuv420p',
+            '-c:a',
+            'aac',
+            '-b:a',
+            '96k',
+            ...output
+          ],
+          null
+        )
+        return
+      } catch {
+        // hardware encoder unavailable in this FFmpeg build; use software below
+      }
+    }
+    await this.runWithProgress(
+      [
+        '-i',
+        inputPath,
+        ...streams,
+        '-vf',
+        filters,
+        '-c:v',
+        'libx264',
+        '-pix_fmt',
+        'yuv420p',
+        '-crf',
+        '28',
+        '-preset',
+        'ultrafast',
+        '-c:a',
+        'aac',
+        '-b:a',
+        '96k',
+        ...output
+      ],
+      null
+    )
+  }
+
+  /**
+   * Cuts [startSeconds, endSeconds] out of the source.
+   *
+   * Speed strategy (fastest first):
+   *  1) Start is at 0 -> stream copy. No re-encode, finishes almost instantly, and it is still
+   *     exact because the very first frame is always a keyframe.
+   *  2) macOS -> hardware H.264 encoder (videotoolbox), bitrate matched to the source.
+   *  3) Everything else -> libx264 `veryfast` (about 3-4x faster than `medium`).
+   *
+   * `-ss` is placed before `-i` so FFmpeg seeks directly instead of decoding from the start,
+   * and the re-encode paths stay frame-accurate.
+   */
+  async trim(
+    inputPath: string,
+    outputPath: string,
+    startSeconds: number,
+    endSeconds: number,
+    onProgress?: (percent: number) => void
+  ): Promise<void> {
+    if (!ffmpegPath) throw new Error('The bundled FFmpeg binary is unavailable for this computer.')
+    const length = endSeconds - startSeconds
+    if (!(length > 0)) throw new Error('The selected trim range is empty.')
+    const durationMs = length * 1000
+    const streams = ['-map', '0:v:0?', '-map', '0:a:0?', '-sn', '-dn']
+    const seekInput = ['-ss', startSeconds.toFixed(3), '-i', inputPath, '-t', length.toFixed(3)]
+    const tail = ['-movflags', '+faststart', '-progress', 'pipe:2', '-nostats', '-y', outputPath]
+
+    // 1) Only the end is being cut: copy the streams, no re-encode needed.
+    if (startSeconds <= 0.05) {
+      try {
+        await this.runWithProgress(
+          [...seekInput, ...streams, '-c', 'copy', '-avoid_negative_ts', 'make_zero', ...tail],
+          durationMs,
+          onProgress
+        )
+        onProgress?.(100)
+        return
+      } catch {
+        // some containers cannot be copied into MP4; fall through to a real encode
+      }
+    }
+
+    // 2) macOS hardware encoder, with the source bitrate so quality stays close to the original.
+    if (process.platform === 'darwin') {
+      try {
+        const { bitrateKbps } = await this.readMediaInfo(inputPath)
+        const target = Math.min(20000, Math.max(1500, bitrateKbps ?? 6000))
+        await this.runWithProgress(
+          [
+            '-hwaccel',
+            'videotoolbox',
+            ...seekInput,
+            ...streams,
+            '-c:v',
+            'h264_videotoolbox',
+            '-b:v',
+            `${target}k`,
+            '-pix_fmt',
+            'yuv420p',
+            '-c:a',
+            'aac',
+            '-b:a',
+            '128k',
+            ...tail
+          ],
+          durationMs,
+          onProgress
+        )
+        onProgress?.(100)
+        return
+      } catch {
+        // hardware encoder unavailable in this FFmpeg build; use software below
+      }
+    }
+
+    // 3) Software encode, tuned for speed.
+    await this.runWithProgress(
+      [
+        ...seekInput,
+        ...streams,
+        '-c:v',
+        'libx264',
+        '-crf',
+        '20',
+        '-preset',
+        'veryfast',
+        '-pix_fmt',
+        'yuv420p',
+        '-c:a',
+        'aac',
+        '-b:a',
+        '128k',
+        ...tail
+      ],
+      durationMs,
+      onProgress
+    )
+    onProgress?.(100)
+  }
+
+  async crop(
+    inputPath: string,
+    outputPath: string,
+    area: { left: number; top: number; width: number; height: number },
+    onProgress?: (percent: number) => void
+  ): Promise<void> {
+    if (!ffmpegPath) throw new Error('The bundled FFmpeg binary is unavailable for this computer.')
+    const durationMs = await this.readDuration(inputPath)
+    await this.runWithProgress(
+      [
+        '-i',
+        inputPath,
+        '-map',
+        '0:v:0?',
+        '-map',
+        '0:a:0?',
+        '-sn',
+        '-dn',
+        '-vf',
+        `crop=${area.width}:${area.height}:${area.left}:${area.top}`,
+        '-c:v',
+        'libx264',
+        '-crf',
+        '20',
+        '-preset',
+        'medium',
+        '-c:a',
+        'aac',
+        '-movflags',
+        '+faststart',
+        '-progress',
+        'pipe:2',
+        '-nostats',
+        '-y',
+        outputPath
+      ],
+      durationMs,
+      onProgress
+    )
+  }
+
+  async mute(
+    inputPath: string,
+    outputPath: string,
+    onProgress?: (percent: number) => void
+  ): Promise<void> {
+    if (!ffmpegPath) throw new Error('The bundled FFmpeg binary is unavailable for this computer.')
+    const durationMs = await this.readDuration(inputPath)
+    await this.runWithProgress(
+      [
+        '-i',
+        inputPath,
+        '-map',
+        '0:v:0?',
+        '-c:v',
+        'copy',
+        '-an',
+        '-movflags',
+        '+faststart',
+        '-progress',
+        'pipe:2',
+        '-nostats',
+        '-y',
+        outputPath
+      ],
+      durationMs,
+      onProgress
+    )
+  }
+
+  async changeSpeed(
+    inputPath: string,
+    outputPath: string,
+    speed: number,
+    onProgress?: (percent: number) => void
+  ): Promise<void> {
+    if (!ffmpegPath) throw new Error('The bundled FFmpeg binary is unavailable for this computer.')
+    const durationMs = await this.readDuration(inputPath)
+    const outputDurationMs = durationMs ? durationMs / speed : null
+    const streams = ['-map', '0:v:0?', '-map', '0:a:0?', '-sn', '-dn']
+
+    // The default 1× option changes nothing. Avoid a full decode/re-encode in
+    // this case and copy the streams directly, which is normally near-instant.
+    if (speed === 1) {
+      try {
+        await this.runWithProgress(
+          [
+            '-i',
+            inputPath,
+            ...streams,
+            '-c',
+            'copy',
+            '-movflags',
+            '+faststart',
+            '-progress',
+            'pipe:2',
+            '-nostats',
+            '-y',
+            outputPath
+          ],
+          durationMs,
+          onProgress
+        )
+        onProgress?.(100)
+        return
+      } catch {
+        // Some source codecs cannot be copied into MP4. Use the normal
+        // compatible re-encode route below in that case.
+      }
+    }
+
+    const tempos: number[] = []
+    let remaining = speed
+    while (remaining < 0.5) {
+      tempos.push(0.5)
+      remaining /= 0.5
+    }
+    while (remaining > 2) {
+      tempos.push(2)
+      remaining /= 2
+    }
+    tempos.push(remaining)
+    const filters = [
+      '-filter:v',
+      `setpts=PTS/${speed}`,
+      '-filter:a',
+      tempos.map((tempo) => `atempo=${tempo}`).join(',')
+    ]
+    const tail = [
+      '-c:a',
+      'aac',
+      '-b:a',
+      '128k',
+      '-movflags',
+      '+faststart',
+      '-progress',
+      'pipe:2',
+      '-nostats',
+      '-y',
+      outputPath
+    ]
+
+    // VideoToolbox encodes on the Mac GPU/media engine and is dramatically
+    // faster than libx264 for phone footage. Preserve a sensible source-like
+    // bitrate; if an older Mac or FFmpeg build cannot use it, fall back below.
+    if (process.platform === 'darwin') {
+      try {
+        const { bitrateKbps } = await this.readMediaInfo(inputPath)
+        const target = Math.min(20000, Math.max(1500, bitrateKbps ?? 6000))
+        await this.runWithProgress(
+          [
+            '-hwaccel',
+            'videotoolbox',
+            '-i',
+            inputPath,
+            ...streams,
+            ...filters,
+            '-c:v',
+            'h264_videotoolbox',
+            '-b:v',
+            `${target}k`,
+            '-pix_fmt',
+            'yuv420p',
+            ...tail
+          ],
+          outputDurationMs,
+          onProgress
+        )
+        return
+      } catch {
+        // Fall back to the portable software encoder below.
+      }
+    }
+
+    await this.runWithProgress(
+      [
+        '-i',
+        inputPath,
+        ...streams,
+        ...filters,
+        '-c:v',
+        'libx264',
+        '-crf',
+        '20',
+        '-preset',
+        'veryfast',
+        ...tail
+      ],
+      outputDurationMs,
+      onProgress
+    )
+  }
+
+  async inspect(inputPath: string): Promise<Array<{ key: string; value: string }>> {
+    if (!ffmpegPath) throw new Error('The bundled FFmpeg binary is unavailable for this computer.')
+    let output = ''
+    try {
+      await execFileAsync(ffmpegPath, ['-hide_banner', '-i', inputPath], { maxBuffer: 256 * 1024 })
+    } catch (error) {
+      output = error && typeof error === 'object' && 'stderr' in error ? String(error.stderr) : ''
+    }
+    if (!output) throw new Error('Unable to read video metadata.')
+    const rows: Array<{ key: string; value: string }> = []
+    const duration = output.match(/Duration:\s+([^,]+)/)?.[1]
+    const bitrate = output.match(/bitrate:\s+([^\n]+)/)?.[1]
+    const video = output.match(/Stream #\d+(?::\d+)?(?:\[[^\]]+\])?: Video:\s*([^\n]+)/)?.[1]
+    const audio = output.match(/Stream #\d+(?::\d+)?(?:\[[^\]]+\])?: Audio:\s*([^\n]+)/)?.[1]
+    if (duration) rows.push({ key: 'Duration', value: duration.trim() })
+    if (bitrate) rows.push({ key: 'Bitrate', value: bitrate.trim() })
+    if (video) rows.push({ key: 'Video stream', value: video.trim() })
+    if (audio) rows.push({ key: 'Audio stream', value: audio.trim() })
+    for (const line of output.split(/\r?\n/)) {
+      const match = line.match(/^\s{4}([\w -]+)\s*:\s*(.+)$/)
+      if (
+        !match ||
+        !['title', 'artist', 'comment', 'creation_time', 'location'].includes(match[1].trim())
+      )
+        continue
+      rows.push({ key: match[1].trim(), value: match[2].trim() })
+    }
+    return rows.length ? rows : [{ key: 'Details', value: 'No readable metadata found.' }]
+  }
+
+  async compress(
+    inputPath: string,
+    outputPath: string,
+    quality: number,
+    maxDimension: number | undefined,
+    onProgress?: (percent: number) => void
+  ): Promise<void> {
+    if (!ffmpegPath) throw new Error('The bundled FFmpeg binary is unavailable for this computer.')
+    const durationMs = await this.readDuration(inputPath)
+    // CRF is inversely related to quality: 18 is visually near-lossless, while
+    // 32 trades more detail for a substantially smaller file.
+    const crf = Math.round(32 - (quality / 100) * 14)
+    const scale = maxDimension
+      ? [
+          '-vf',
+          `scale=w='min(iw,${maxDimension})':h='min(ih,${maxDimension})':force_original_aspect_ratio=decrease`
+        ]
+      : []
+    await this.runWithProgress(
+      [
+        '-i',
+        inputPath,
+        '-map',
+        '0:v:0?',
+        '-map',
+        '0:a:0?',
+        '-sn',
+        '-dn',
+        ...scale,
+        '-c:v',
+        'libx264',
+        '-crf',
+        String(crf),
+        '-preset',
+        'medium',
+        '-c:a',
+        'aac',
+        '-b:a',
+        '128k',
+        '-movflags',
+        '+faststart',
+        '-progress',
+        'pipe:2',
+        '-nostats',
+        '-y',
+        outputPath
+      ],
+      durationMs,
+      onProgress
+    )
+  }
+
   async convert(
     inputPath: string,
     outputPath: string,
@@ -63,17 +549,74 @@ export class FfmpegVideoConverter {
     }
   }
 
-  private async readDuration(inputPath: string): Promise<number | null> {
+  /**
+   * Writes to a temporary file and renames it only when FFmpeg finished successfully, so an
+   * interrupted run (app closed, crash, timeout) can never leave a half-written file that a
+   * cache check would later treat as a finished preview or poster.
+   */
+  private async writeAtomically(
+    outputPath: string,
+    build: (temporaryPath: string) => Promise<void>
+  ): Promise<void> {
+    const temporaryPath = outputPath.replace(/(\.[^./\\]+)$/, '.part$1')
+    try {
+      await build(temporaryPath)
+      await rename(temporaryPath, outputPath)
+    } catch (error) {
+      await rm(temporaryPath, { force: true }).catch(() => undefined)
+      throw error
+    }
+  }
+
+  /** Reads the first video/audio codec so the preview can skip re-encoding when possible. */
+  private async probe(
+    inputPath: string
+  ): Promise<{ video?: string; audio?: string; yuv420p: boolean }> {
+    let output = ''
     try {
       await execFileAsync(ffmpegPath!, ['-hide_banner', '-i', inputPath], { maxBuffer: 256 * 1024 })
-      return null
     } catch (error) {
-      const output =
-        error && typeof error === 'object' && 'stderr' in error ? String(error.stderr) : ''
-      const match = output.match(/Duration:\s+(\d+):(\d+):(\d+(?:\.\d+)?)/)
-      if (!match) return null
-      return (Number(match[1]) * 3600 + Number(match[2]) * 60 + Number(match[3])) * 1000
+      output = error && typeof error === 'object' && 'stderr' in error ? String(error.stderr) : ''
     }
+    const videoLine = output.match(
+      /Stream #\d+(?::\d+)?(?:\[[^\]]+\])?(?:\([^)]*\))?: Video:\s*([^\n]+)/
+    )?.[1]
+    const audioLine = output.match(
+      /Stream #\d+(?::\d+)?(?:\[[^\]]+\])?(?:\([^)]*\))?: Audio:\s*([^\n]+)/
+    )?.[1]
+    return {
+      video: videoLine?.match(/^(\w+)/)?.[1]?.toLowerCase(),
+      audio: audioLine?.match(/^(\w+)/)?.[1]?.toLowerCase(),
+      yuv420p: videoLine ? /\byuv420p\b/.test(videoLine) : false
+    }
+  }
+
+  /** Duration (ms) and overall bitrate (kb/s) parsed from FFmpeg's banner output. */
+  private async readMediaInfo(
+    inputPath: string
+  ): Promise<{ durationMs: number | null; bitrateKbps: number | null }> {
+    let output = ''
+    try {
+      await execFileAsync(ffmpegPath!, ['-hide_banner', '-i', inputPath], { maxBuffer: 256 * 1024 })
+    } catch (error) {
+      output = error && typeof error === 'object' && 'stderr' in error ? String(error.stderr) : ''
+    }
+    const duration = output.match(/Duration:\s+(\d+):(\d+):(\d+(?:\.\d+)?)/)
+    const bitrate = output.match(/bitrate:\s+(\d+)\s*kb\/s/)
+    return {
+      durationMs: duration
+        ? (Number(duration[1]) * 3600 + Number(duration[2]) * 60 + Number(duration[3])) * 1000
+        : null,
+      bitrateKbps: bitrate ? Number(bitrate[1]) : null
+    }
+  }
+
+  private async readDuration(inputPath: string): Promise<number | null> {
+    return (await this.readMediaInfo(inputPath)).durationMs
+  }
+
+  private previewFilters(lightweight = false): string {
+    return lightweight ? `fps=30,scale=w='min(iw,480)':h=-2` : `scale=w='min(iw,960)':h=-2`
   }
 
   private runWithProgress(

@@ -1,8 +1,21 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, screen, shell, Tray } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  globalShortcut,
+  ipcMain,
+  Menu,
+  protocol,
+  screen,
+  shell,
+  Tray
+} from 'electron'
 import { execFile } from 'node:child_process'
 import { basename, join } from 'path'
 import { readFile, stat } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { Readable } from 'node:stream'
 import { isAbsolute, resolve } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import sharp from 'sharp'
 import { promisify } from 'node:util'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -27,12 +40,37 @@ const conversionManager = new ConversionManager()
 const execFileAsync = promisify(execFile)
 let nativeDismissTimer: ReturnType<typeof setTimeout> | null = null
 let nativeDragCandidateVisible = false
+const localMediaSources = new Map<string, string>()
 // The crop editor needs room for a comfortably sized preview and its controls.
 const MENU_SIZE = 660
 const shortcuts =
   process.platform === 'darwin'
     ? ['CommandOrControl+Shift+Space', 'Control+Shift+Space', 'CommandOrControl+Alt+Space']
     : ['CommandOrControl+Shift+Space', 'CommandOrControl+Alt+Space']
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'toolkit-media',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+      corsEnabled: true,
+      bypassCSP: true
+    }
+  }
+])
+
+const videoMimeType = (inputPath: string): string => {
+  const extension = inputPath.split('.').pop()?.toLowerCase()
+  if (extension === 'mov') return 'video/quicktime'
+  if (extension === 'webm') return 'video/webm'
+  if (extension === 'mkv') return 'video/x-matroska'
+  if (extension === 'avi') return 'video/x-msvideo'
+  return 'video/mp4'
+}
+
 function isImageConversionRequest(value: unknown): value is ImageConversionRequest {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Record<string, unknown>
@@ -53,6 +91,84 @@ function isVideoConversionRequest(value: unknown): value is VideoConversionReque
   return (
     hasSafeInputPath(candidate) &&
     ['mp4', 'mov', 'mp3', 'gif', 'webm', 'mkv', 'avi'].includes(String(candidate.targetFormat))
+  )
+}
+function isVideoCompressionRequest(value: unknown): value is {
+  inputPath: string
+  operation: 'video-compress'
+  quality: number
+  maxDimension?: number
+} {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return (
+    hasSafeInputPath(candidate) &&
+    candidate.operation === 'video-compress' &&
+    typeof candidate.quality === 'number' &&
+    Number.isInteger(candidate.quality) &&
+    candidate.quality >= 1 &&
+    candidate.quality <= 100 &&
+    (candidate.maxDimension === undefined ||
+      (typeof candidate.maxDimension === 'number' &&
+        Number.isInteger(candidate.maxDimension) &&
+        candidate.maxDimension >= 240 &&
+        candidate.maxDimension <= 7680))
+  )
+}
+function isVideoTrimRequest(value: unknown): value is {
+  inputPath: string
+  operation: 'video-trim'
+  startSeconds: number
+  endSeconds: number
+} {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return (
+    hasSafeInputPath(candidate) &&
+    candidate.operation === 'video-trim' &&
+    typeof candidate.startSeconds === 'number' &&
+    typeof candidate.endSeconds === 'number' &&
+    Number.isFinite(candidate.startSeconds) &&
+    Number.isFinite(candidate.endSeconds) &&
+    candidate.startSeconds >= 0 &&
+    candidate.endSeconds > candidate.startSeconds
+  )
+}
+function isVideoCropRequest(value: unknown): value is {
+  inputPath: string
+  operation: 'video-crop'
+  left: number
+  top: number
+  width: number
+  height: number
+} {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return (
+    hasSafeInputPath(candidate) &&
+    candidate.operation === 'video-crop' &&
+    ['left', 'top', 'width', 'height'].every(
+      (key) =>
+        typeof candidate[key] === 'number' &&
+        Number.isInteger(candidate[key]) &&
+        (candidate[key] as number) >= 0
+    ) &&
+    (candidate.width as number) > 0 &&
+    (candidate.height as number) > 0
+  )
+}
+function isVideoSpeedRequest(value: unknown): value is {
+  inputPath: string
+  operation: 'video-speed'
+  speed: number
+} {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return (
+    hasSafeInputPath(candidate) &&
+    candidate.operation === 'video-speed' &&
+    typeof candidate.speed === 'number' &&
+    [0.25, 0.5, 1, 1.5, 2, 4].includes(candidate.speed)
   )
 }
 
@@ -289,6 +405,38 @@ function createTray(): void {
 app.whenReady().then(() => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.electron')
+  protocol.handle('toolkit-media', async (request) => {
+    const token = new URL(request.url).hostname
+    const inputPath = localMediaSources.get(token)
+    if (!inputPath) return new Response('Not found', { status: 404 })
+    const details = await stat(inputPath)
+    const total = details.size
+    const range = request.headers.get('range')
+    const match = range?.match(/^bytes=(\d*)-(\d*)$/)
+    const start = match?.[1] ? Number(match[1]) : 0
+    const end = match?.[2] ? Math.min(Number(match[2]), total - 1) : total - 1
+    if (
+      !Number.isInteger(start) ||
+      !Number.isInteger(end) ||
+      start < 0 ||
+      start > end ||
+      end >= total
+    )
+      return new Response('Invalid range', {
+        status: 416,
+        headers: { 'Content-Range': `bytes */${total}` }
+      })
+    const stream = Readable.toWeb(createReadStream(inputPath, { start, end }))
+    return new Response(stream as unknown as BodyInit, {
+      status: match ? 206 : 200,
+      headers: {
+        'Content-Type': videoMimeType(inputPath),
+        'Accept-Ranges': 'bytes',
+        'Content-Length': String(end - start + 1),
+        ...(match ? { 'Content-Range': `bytes ${start}-${end}/${total}` } : {})
+      }
+    })
+  })
   if (process.platform === 'darwin') app.dock?.hide()
 
   // Default open or close DevTools by F12 in development
@@ -360,6 +508,70 @@ app.whenReady().then(() => {
     return conversionManager.convertVideo(payload, (percent) =>
       event.sender.send('conversion:video-progress', percent)
     )
+  })
+  ipcMain.handle('conversion:video-compress', async (event, payload: unknown) => {
+    if (!isVideoCompressionRequest(payload)) throw new Error('Invalid video compression request.')
+    return conversionManager.compressVideo(payload, (percent) =>
+      event.sender.send('conversion:video-progress', percent)
+    )
+  })
+  ipcMain.handle('conversion:video-mute', async (event, inputPath: unknown) => {
+    if (typeof inputPath !== 'string' || !isAbsolute(inputPath) || inputPath.includes('\0'))
+      throw new Error('Invalid video path.')
+    return conversionManager.muteVideo(inputPath, (percent) =>
+      event.sender.send('conversion:video-progress', percent)
+    )
+  })
+  ipcMain.handle('conversion:video-trim', async (event, payload: unknown) => {
+    if (!isVideoTrimRequest(payload)) throw new Error('Invalid video trim request.')
+    return conversionManager.trimVideo(payload, (percent) =>
+      event.sender.send('conversion:video-progress', percent)
+    )
+  })
+  ipcMain.handle('conversion:video-crop', async (event, payload: unknown) => {
+    if (!isVideoCropRequest(payload)) throw new Error('Invalid video crop request.')
+    return conversionManager.cropVideo(payload, (percent) =>
+      event.sender.send('conversion:video-progress', percent)
+    )
+  })
+  ipcMain.handle('conversion:video-speed', async (event, payload: unknown) => {
+    if (!isVideoSpeedRequest(payload)) throw new Error('Invalid video speed request.')
+    return conversionManager.changeVideoSpeed(payload, (percent) =>
+      event.sender.send('conversion:video-progress', percent)
+    )
+  })
+  ipcMain.handle('video:metadata', async (_, inputPath: unknown) => {
+    if (typeof inputPath !== 'string' || !isAbsolute(inputPath) || inputPath.includes('\0'))
+      throw new Error('Invalid video path.')
+    return conversionManager.getVideoMetadata(inputPath)
+  })
+  ipcMain.handle('video:source-url', async (_, inputPath: unknown) => {
+    if (typeof inputPath !== 'string' || !isAbsolute(inputPath) || inputPath.includes('\0'))
+      throw new Error('Invalid video path.')
+    const path = await conversionManager.createVideoPreview(resolve(inputPath))
+    const details = await stat(path)
+    if (!details.isFile()) throw new Error('The selected video is not a regular file.')
+    const token = randomUUID()
+    localMediaSources.set(token, path)
+    return `toolkit-media://${token}/${encodeURIComponent(basename(path))}`
+  })
+  ipcMain.handle('video:poster', async (_, inputPath: unknown) => {
+    if (typeof inputPath !== 'string' || !isAbsolute(inputPath) || inputPath.includes('\0'))
+      throw new Error('Invalid video path.')
+    return conversionManager.createVideoPoster(inputPath)
+  })
+  ipcMain.handle('conversion:archive', async (_, inputPaths: unknown) => {
+    if (
+      !Array.isArray(inputPaths) ||
+      inputPaths.length < 1 ||
+      inputPaths.length > 100 ||
+      !inputPaths.every(
+        (inputPath) =>
+          typeof inputPath === 'string' && isAbsolute(inputPath) && !inputPath.includes('\0')
+      )
+    )
+      throw new Error('Invalid archive input path.')
+    return conversionManager.archiveFiles(inputPaths)
   })
   ipcMain.handle('conversion:images-to-pdf', async (_, payload: unknown) => {
     if (!isImagesToPdfRequest(payload)) throw new Error('Invalid PDF conversion request.')
