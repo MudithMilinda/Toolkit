@@ -11,6 +11,7 @@ import { FfmpegVideoConverter } from './converters/FfmpegVideoConverter'
 import { OutputManager } from './OutputManager'
 import type {
   ConversionResult,
+  ArchiveTargetFormat,
   ImageBackgroundRemovalRequest,
   ImageCompressionRequest,
   ImageCropRequest,
@@ -22,6 +23,7 @@ import type {
   VideoCompressionRequest,
   VideoCropRequest,
   VideoSpeedRequest,
+  VideoTargetFormat,
   VideoTrimRequest,
   VideoConversionRequest
 } from './types'
@@ -237,11 +239,16 @@ export class ConversionManager {
       ? join(process.resourcesPath, 'native', 'video-converter')
       : join(app.getAppPath(), 'native', 'macos', 'bin', 'video-converter')
     try {
-      if (['webm', 'mkv', 'avi', 'mp3'].includes(request.targetFormat)) {
+      if (
+        ['webm', 'mkv', 'avi', 'mp3', 'wav', 'flac', 'ogg', 'opus', 'aiff'].includes(
+          request.targetFormat
+        )
+      ) {
         await this.ffmpegVideoConverter.convert(
           inputPath,
           temporaryPath,
-          request.targetFormat as 'webm' | 'mkv' | 'avi' | 'mp3',
+          request.targetFormat as
+            'webm' | 'mkv' | 'avi' | 'mp3' | 'wav' | 'flac' | 'ogg' | 'opus' | 'aiff',
           onProgress
         )
       } else {
@@ -251,7 +258,7 @@ export class ConversionManager {
         temporaryPath,
         inputPath,
         request.targetFormat,
-        request.targetFormat === 'mp3'
+        ['mp3', 'wav', 'flac', 'ogg', 'opus', 'aiff'].includes(request.targetFormat)
           ? '-audio'
           : request.targetFormat === 'gif'
             ? '-animated'
@@ -742,8 +749,25 @@ export class ConversionManager {
     if (source.size > 4 * 1024 * 1024 * 1024)
       throw new Error('The selected video exceeds the 4 GB safety limit.')
     const extension = inputPath.split('.').pop()?.toLowerCase()
-    if (!extension || !['mp4', 'mov', 'webm', 'mkv', 'avi'].includes(extension))
-      throw new Error('Unsupported video format.')
+    if (
+      !extension ||
+      ![
+        'mp4',
+        'mov',
+        'webm',
+        'mkv',
+        'avi',
+        'mp3',
+        'wav',
+        'aac',
+        'flac',
+        'ogg',
+        'opus',
+        'aif',
+        'aiff'
+      ].includes(extension)
+    )
+      throw new Error('Unsupported media format.')
     return { inputPath, source, normalizedSource: extension }
   }
 
@@ -776,8 +800,7 @@ export class ConversionManager {
     inputPath: string,
     outputPath: string,
     sourceFormat: string,
-    targetFormat:
-      ImageTargetFormat | 'mp4' | 'mov' | 'mp3' | 'gif' | 'webm' | 'mkv' | 'avi' | 'zip',
+    targetFormat: ImageTargetFormat | VideoTargetFormat | ArchiveTargetFormat,
     originalSize: number,
     outputSize: number,
     startedAt: number

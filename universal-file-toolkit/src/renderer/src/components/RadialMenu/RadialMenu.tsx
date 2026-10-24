@@ -8,6 +8,7 @@ import './radialMenu.css'
 
 interface Props {
   file: File | null
+  draggedFileName?: string | null
   convertOperations: FileOperation[]
   toolOperations: FileOperation[]
   activeModifier?: 'shift' | 'command'
@@ -21,6 +22,7 @@ interface Props {
 
 export default function RadialMenu({
   file,
+  draggedFileName,
   convertOperations,
   toolOperations,
   activeModifier,
@@ -53,7 +55,11 @@ export default function RadialMenu({
       window.removeEventListener('keyup', resetModifier)
     }
   }, [])
-  const operations = modifier === 'command' ? toolOperations : convertOperations
+  // Audio has conversion formats but no Q-only tool actions. If a modifier
+  // event arrives late during a Finder drag, retain its conversion wheel
+  // rather than rendering an empty ring.
+  const operations =
+    modifier === 'command' && toolOperations.length ? toolOperations : convertOperations
   useEffect(() => setHovered(null), [modifier])
   const selectIndex = useCallback(
     (index: number) => {
@@ -62,7 +68,8 @@ export default function RadialMenu({
     [onSelect, operations]
   )
   const keyboardIndex = useKeyboardNavigation(operations.length, selectIndex, onDismiss)
-  const category = file ? getFileCategory(file.name) : 'image'
+  const previewFileName = file?.name ?? draggedFileName ?? null
+  const category = previewFileName ? getFileCategory(previewFileName) : 'image'
   const hoveredOperation = hovered !== null ? operations[hovered] : null
   const centerLabel =
     processingProgress !== null
@@ -73,8 +80,8 @@ export default function RadialMenu({
           : 'Converting'
       : isDragging && hoveredOperation
         ? hoveredOperation.label
-        : file
-          ? getFileExtension(file.name).toUpperCase()
+        : previewFileName
+          ? getFileExtension(previewFileName).toUpperCase()
           : 'DROP FILE'
   const centerSubLabel =
     processingProgress !== null
@@ -83,7 +90,7 @@ export default function RadialMenu({
         : `${processingProgress}%`
       : isDragging && hoveredOperation
         ? 'release to convert'
-        : file
+        : previewFileName
           ? category
           : 'ready to convert'
 

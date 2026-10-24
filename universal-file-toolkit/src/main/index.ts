@@ -90,7 +90,20 @@ function isVideoConversionRequest(value: unknown): value is VideoConversionReque
   const candidate = value as Record<string, unknown>
   return (
     hasSafeInputPath(candidate) &&
-    ['mp4', 'mov', 'mp3', 'gif', 'webm', 'mkv', 'avi'].includes(String(candidate.targetFormat))
+    [
+      'mp4',
+      'mov',
+      'mp3',
+      'gif',
+      'webm',
+      'mkv',
+      'avi',
+      'wav',
+      'flac',
+      'ogg',
+      'opus',
+      'aiff'
+    ].includes(String(candidate.targetFormat))
   )
 }
 function isVideoCompressionRequest(value: unknown): value is {

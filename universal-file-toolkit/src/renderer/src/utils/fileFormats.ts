@@ -36,10 +36,10 @@ const operationMap: Record<FileCategory, FileOperation[]> = {
   audio: entries([
     ['mp3', 'MP3'],
     ['wav', 'WAV'],
-    ['aac', 'AAC'],
-    ['trim', 'Trim'],
-    ['compress', 'Compress'],
-    ['metadata', 'Metadata']
+    ['flac', 'FLAC'],
+    ['ogg', 'OGG'],
+    ['opus', 'OPUS'],
+    ['aiff', 'AIFF']
   ]),
   unknown: []
 }
@@ -54,7 +54,7 @@ export function getFileCategory(filename: string): FileCategory {
   }
   if (ext === 'pdf') return 'document'
   if (['mp4', 'mov', 'webm', 'mkv', 'avi'].includes(ext)) return 'video'
-  if (['mp3', 'wav', 'aac'].includes(ext)) return 'audio'
+  if (['mp3', 'wav', 'aac', 'flac', 'ogg', 'opus', 'aif', 'aiff'].includes(ext)) return 'audio'
   return 'unknown'
 }
 export const getOperationsForFile = (filename: string): FileOperation[] =>
@@ -84,13 +84,23 @@ const videoToolOperations = entries([
   ['video-speed', 'Speed'],
   ['send-email', 'Send Email']
 ])
+const audioToolOperations = entries([
+  ['audio-compress', 'Compress'],
+  ['zip', 'ZIP'],
+  ['audio-metadata', 'Metadata'],
+  ['audio-normalize', 'Normalize'],
+  ['audio-trim', 'Trim'],
+  ['audio-bleep', 'Bleep']
+])
 
 export const getFileToolOperations = (filename: string): FileOperation[] =>
   getFileCategory(filename) === 'image'
     ? imageToolOperations
     : getFileCategory(filename) === 'video'
       ? videoToolOperations
-      : []
+      : getFileCategory(filename) === 'audio'
+        ? audioToolOperations
+        : []
 export const formatFileSize = (bytes: number): string =>
   bytes < 1024
     ? `${bytes} B`

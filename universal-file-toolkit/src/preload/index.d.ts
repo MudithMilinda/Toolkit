@@ -18,7 +18,19 @@ declare global {
       }>
       convertVideo: (payload: {
         inputPath: string
-        targetFormat: 'mp4' | 'mov' | 'mp3' | 'gif' | 'webm' | 'mkv' | 'avi'
+        targetFormat:
+          | 'mp4'
+          | 'mov'
+          | 'mp3'
+          | 'gif'
+          | 'webm'
+          | 'mkv'
+          | 'avi'
+          | 'wav'
+          | 'flac'
+          | 'ogg'
+          | 'opus'
+          | 'aiff'
       }) => Promise<{
         outputPath: string
         originalSize: number

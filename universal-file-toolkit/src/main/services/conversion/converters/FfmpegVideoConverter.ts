@@ -495,7 +495,7 @@ export class FfmpegVideoConverter {
   async convert(
     inputPath: string,
     outputPath: string,
-    format: 'webm' | 'mkv' | 'avi' | 'mp3',
+    format: 'webm' | 'mkv' | 'avi' | 'mp3' | 'wav' | 'flac' | 'ogg' | 'opus' | 'aiff',
     onProgress?: (percent: number) => void
   ): Promise<void> {
     if (!ffmpegPath) throw new Error('The bundled FFmpeg binary is unavailable for this computer.')
@@ -506,22 +506,32 @@ export class FfmpegVideoConverter {
     const formatArguments =
       format === 'mp3'
         ? ['-vn', '-c:a', 'libmp3lame', '-q:a', '2']
-        : format === 'webm'
-          ? [
-              '-c:v',
-              'libvpx',
-              '-deadline',
-              'realtime',
-              '-cpu-used',
-              '8',
-              '-b:v',
-              '2M',
-              '-c:a',
-              'libopus'
-            ]
-          : format === 'mkv'
-            ? ['-c:v', 'libx264', '-crf', '23', '-c:a', 'aac']
-            : ['-c:v', 'mpeg4', '-q:v', '5', '-c:a', 'libmp3lame']
+        : format === 'wav'
+          ? ['-vn', '-c:a', 'pcm_s16le']
+          : format === 'flac'
+            ? ['-vn', '-c:a', 'flac']
+            : format === 'ogg'
+              ? ['-vn', '-c:a', 'libvorbis', '-q:a', '5']
+              : format === 'opus'
+                ? ['-vn', '-c:a', 'libopus', '-b:a', '128k']
+                : format === 'aiff'
+                  ? ['-vn', '-c:a', 'pcm_s16be']
+                  : format === 'webm'
+                    ? [
+                        '-c:v',
+                        'libvpx',
+                        '-deadline',
+                        'realtime',
+                        '-cpu-used',
+                        '8',
+                        '-b:v',
+                        '2M',
+                        '-c:a',
+                        'libopus'
+                      ]
+                    : format === 'mkv'
+                      ? ['-c:v', 'libx264', '-crf', '23', '-c:a', 'aac']
+                      : ['-c:v', 'mpeg4', '-q:v', '5', '-c:a', 'libmp3lame']
     try {
       const durationMs = await this.readDuration(inputPath)
       await this.runWithProgress(

@@ -235,30 +235,44 @@ function App(): React.JSX.Element {
           .finally(() => setIsProcessing(false))
         return
       }
-      if (['mp4', 'mov', 'mp3', 'gif', 'webm', 'mkv', 'avi'].includes(nextOperation.id)) {
+      if (
+        [
+          'mp4',
+          'mov',
+          'mp3',
+          'gif',
+          'webm',
+          'mkv',
+          'avi',
+          'wav',
+          'flac',
+          'ogg',
+          'opus',
+          'aiff'
+        ].includes(nextOperation.id)
+      ) {
         const inputPath = window.api.getPathForFile(selectedFile)
         if (!inputPath) {
           setNotice('The dropped file path could not be read. Please drop the file again.')
           return
         }
-        const targetFormat: 'mp4' | 'mov' | 'mp3' | 'gif' | 'webm' | 'mkv' | 'avi' =
-          nextOperation.id === 'mp4'
-            ? 'mp4'
-            : nextOperation.id === 'mov'
-              ? 'mov'
-              : nextOperation.id === 'mp3'
-                ? 'mp3'
-                : nextOperation.id === 'gif'
-                  ? 'gif'
-                  : nextOperation.id === 'webm'
-                    ? 'webm'
-                    : nextOperation.id === 'mkv'
-                      ? 'mkv'
-                      : 'avi'
+        const targetFormat = nextOperation.id as Parameters<
+          typeof window.api.convertVideo
+        >[0]['targetFormat']
         setIsProcessing(true)
         setConversionProgress(0)
         let progress = 0
-        const reportsFrameProgress = ['webm', 'mkv', 'avi', 'mp3'].includes(targetFormat)
+        const reportsFrameProgress = [
+          'webm',
+          'mkv',
+          'avi',
+          'mp3',
+          'wav',
+          'flac',
+          'ogg',
+          'opus',
+          'aiff'
+        ].includes(targetFormat)
         const progressTimer = reportsFrameProgress
           ? undefined
           : window.setInterval(() => {
@@ -273,10 +287,9 @@ function App(): React.JSX.Element {
             }, 350)
         void window.api
           .convertVideo({ inputPath, targetFormat })
-          .then((result) => {
+          .then(() => {
             if (progressTimer) window.clearInterval(progressTimer)
             setConversionProgress(100)
-            setNotice(`Conversion successful — ${result.outputPath.split(/[\\/]/).pop()}.`)
             window.setTimeout(() => void window.api.closeRadialMenu(), 1000)
           })
           .catch((error: unknown) => {
@@ -492,6 +505,7 @@ function App(): React.JSX.Element {
     // the previous editor while it is hidden so a Q-drag never flashes that
     // stale panel before the fresh radial wheel is rendered.
     const clearHiddenPanel = (): void => {
+      reset()
       setOptionsMode(null)
       setOperation(null)
       setPanelStatus(null)
@@ -500,7 +514,7 @@ function App(): React.JSX.Element {
     }
     window.addEventListener('blur', clearHiddenPanel)
     return () => window.removeEventListener('blur', clearHiddenPanel)
-  }, [])
+  }, [reset])
   useEffect(() => window.api.onRadialMenuModifier(setDragModifier), [])
   useEffect(() => window.api.onRadialMenuDragFile(setDraggedFileName), [])
   useEffect(() => {
@@ -537,6 +551,7 @@ function App(): React.JSX.Element {
               <div className="grid size-full place-items-center">
                 <RadialMenu
                   file={file}
+                  draggedFileName={draggedFileName}
                   convertOperations={convertOperations}
                   toolOperations={toolOperations}
                   activeModifier={dragModifier}

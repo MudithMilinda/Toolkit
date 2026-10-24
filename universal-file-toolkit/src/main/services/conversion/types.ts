@@ -1,7 +1,8 @@
 export type ConversionStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled'
 
 export type ImageTargetFormat = 'png' | 'jpg' | 'webp' | 'pdf' | 'heic' | 'tiff' | 'avif' | 'bmp'
-export type VideoTargetFormat = 'mp4' | 'mov' | 'mp3' | 'gif' | 'webm' | 'mkv' | 'avi'
+export type VideoTargetFormat =
+  'mp4' | 'mov' | 'mp3' | 'gif' | 'webm' | 'mkv' | 'avi' | 'wav' | 'flac' | 'ogg' | 'opus' | 'aiff'
 export type ArchiveTargetFormat = 'zip'
 
 export interface ImageConversionOptions {
