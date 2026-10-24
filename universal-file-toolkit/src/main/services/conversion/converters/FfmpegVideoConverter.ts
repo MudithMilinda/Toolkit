@@ -76,7 +76,7 @@ export class FfmpegVideoConverter {
             '-c:v',
             'h264_videotoolbox',
             '-b:v',
-            '2M',
+            '900k',
             '-pix_fmt',
             'yuv420p',
             '-c:a',
@@ -616,7 +616,10 @@ export class FfmpegVideoConverter {
   }
 
   private previewFilters(lightweight = false): string {
-    return lightweight ? `fps=30,scale=w='min(iw,480)':h=-2` : `scale=w='min(iw,960)':h=-2`
+    // Interactive tools need a responsive proxy, not an export-quality movie.
+    // Reducing a HEVC/4K source to 360px at 15fps dramatically shortens the
+    // first preview transcode while preserving enough detail for crop/trim UI.
+    return lightweight ? `fps=15,scale=w='min(iw,360)':h=-2` : `scale=w='min(iw,960)':h=-2`
   }
 
   private runWithProgress(

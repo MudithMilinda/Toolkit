@@ -14,6 +14,7 @@ import ImageEditPanel from './components/ImageEditPanel'
 import ImageMetadataPanel from './components/ImageMetadataPanel'
 import { useFileDrop } from './hooks/useFileDrop'
 import {
+  getFileCategory,
   getFileToolOperations,
   getOperationsForFile,
   type FileOperation
@@ -502,6 +503,13 @@ function App(): React.JSX.Element {
   }, [])
   useEffect(() => window.api.onRadialMenuModifier(setDragModifier), [])
   useEffect(() => window.api.onRadialMenuDragFile(setDraggedFileName), [])
+  useEffect(() => {
+    // Start the shared proxy while a video is being dragged over the tools
+    // wheel. Opening Crop, Trim or Speed can then reuse it immediately.
+    if (!file || dragModifier !== 'command' || getFileCategory(file.name) !== 'video') return
+    const inputPath = window.api.getPathForFile(file)
+    if (inputPath) void window.api.getVideoSourceUrl(inputPath).catch(() => undefined)
+  }, [file, dragModifier])
   useEffect(
     () =>
       window.api.onSettingsRequested(() => {

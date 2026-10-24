@@ -35,6 +35,8 @@ export class ConversionManager {
   private readonly ffmpegVideoConverter = new FfmpegVideoConverter()
   private readonly outputManager = new OutputManager()
   private readonly activeJobs = new Map<string, Promise<ConversionResult>>()
+  /** Browser-preview proxies are reused by Crop, Trim and Speed panels. */
+  private readonly videoPreviews = new Map<string, Promise<string>>()
 
   convertImage(request: ImageConversionRequest): Promise<ConversionResult> {
     const key = `${resolve(request.inputPath)}:${request.targetFormat}`
@@ -70,13 +72,24 @@ export class ConversionManager {
   }
 
   async createVideoPreview(inputPathValue: string): Promise<string> {
-    const { inputPath } = await this.prepareMediaInput(inputPathValue)
+    const { inputPath, source } = await this.prepareMediaInput(inputPathValue)
+    const cacheKey = `${inputPath}:${source.size}:${source.mtimeMs}`
+    const existing = this.videoPreviews.get(cacheKey)
+    if (existing) return existing
     const previewPath = join(
       app.getPath('temp'),
       `${randomUUID()}.universal-file-toolkit-preview.mp4`
     )
-    await this.ffmpegVideoConverter.createPreview(inputPath, previewPath)
-    return previewPath
+    const preview = this.ffmpegVideoConverter
+      .createPreview(inputPath, previewPath)
+      .then(() => previewPath)
+      .catch(async (error: unknown) => {
+        this.videoPreviews.delete(cacheKey)
+        await rm(previewPath, { force: true }).catch(() => undefined)
+        throw error
+      })
+    this.videoPreviews.set(cacheKey, preview)
+    return preview
   }
 
   async createVideoPoster(inputPathValue: string): Promise<string> {
