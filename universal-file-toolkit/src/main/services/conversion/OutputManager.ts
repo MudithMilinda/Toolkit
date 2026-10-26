@@ -1,5 +1,5 @@
 import { constants } from 'node:fs'
-import { access, link, mkdir, rm } from 'node:fs/promises'
+import { access, link, mkdir, rename, rm, stat } from 'node:fs/promises'
 import { basename, dirname, join, parse } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
@@ -22,11 +22,18 @@ export class OutputManager {
     const sourceName = basename(inputPath)
     const safeName = this.sanitizeStem(parse(sourceName).name)
     const extension = targetExtension.replace(/^\./, '').toLowerCase()
+    const temporaryDetails = await stat(temporaryPath)
 
     for (let index = 0; index < 10_000; index += 1) {
       const suffix = index === 0 ? '' : ` (${index})`
       const outputPath = join(directory, `${safeName}${nameSuffix}${suffix}.${extension}`)
       try {
+        // Apple Pages writes a directory package rather than a regular file.
+        // Renaming within the input folder remains atomic and exclusive.
+        if (temporaryDetails.isDirectory()) {
+          await rename(temporaryPath, outputPath)
+          return outputPath
+        }
         // A hard link is an atomic, exclusive publish operation on the same volume.
         // It avoids overwriting a file created by another process between existence checks.
         await link(temporaryPath, outputPath)
@@ -41,7 +48,7 @@ export class OutputManager {
   }
 
   async discardTemporaryFile(path: string): Promise<void> {
-    await rm(path, { force: true }).catch(() => undefined)
+    await rm(path, { force: true, recursive: true }).catch(() => undefined)
   }
 
   private sanitizeStem(stem: string): string {

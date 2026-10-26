@@ -17,6 +17,22 @@ declare global {
         outputSize: number
         savedPercent: number
       }>
+      convertPdf: (payload: {
+        inputPath: string
+        targetFormat: 'docx' | 'pages' | 'pptx' | 'xlsx' | 'epub' | 'txt' | 'md' | 'jpg' | 'png'
+      }) => Promise<{
+        outputPath: string
+        originalSize: number
+        outputSize: number
+        savedPercent: number
+      }>
+      compressPdf: (payload: { inputPath: string; operation: 'pdf-compress' }) => Promise<{
+        outputPath: string
+        originalSize: number
+        outputSize: number
+        savedPercent: number
+      }>
+      getPdfMetadata: (inputPath: string) => Promise<Array<{ key: string; value: string }>>
       convertVideo: (payload: {
         inputPath: string
         targetFormat:

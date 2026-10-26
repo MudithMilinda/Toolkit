@@ -4,6 +4,7 @@ export type ImageTargetFormat = 'png' | 'jpg' | 'webp' | 'pdf' | 'heic' | 'tiff'
 export type VideoTargetFormat =
   'mp4' | 'mov' | 'mp3' | 'gif' | 'webm' | 'mkv' | 'avi' | 'wav' | 'flac' | 'ogg' | 'opus' | 'aiff'
 export type ArchiveTargetFormat = 'zip'
+export type DocumentTargetFormat = 'docx' | 'pages' | 'pptx' | 'xlsx' | 'epub' | 'txt' | 'md'
 
 export interface ImageConversionOptions {
   /** Preserve EXIF/XMP/ICC metadata only when the user explicitly asks for it. */
@@ -18,6 +19,14 @@ export interface ImageConversionRequest {
   inputPath: string
   targetFormat: ImageTargetFormat
   options?: ImageConversionOptions
+}
+export interface PdfConversionRequest {
+  inputPath: string
+  targetFormat: DocumentTargetFormat | 'jpg' | 'png'
+}
+export interface PdfCompressionRequest {
+  inputPath: string
+  operation: 'pdf-compress'
 }
 export interface VideoConversionRequest {
   inputPath: string
@@ -127,7 +136,7 @@ export interface ConversionResult {
   inputPath: string
   outputPath: string
   sourceFormat: string
-  targetFormat: ImageTargetFormat | VideoTargetFormat | ArchiveTargetFormat
+  targetFormat: ImageTargetFormat | VideoTargetFormat | ArchiveTargetFormat | DocumentTargetFormat
   originalSize: number
   outputSize: number
   savedPercent: number

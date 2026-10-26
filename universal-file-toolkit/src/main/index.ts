@@ -32,6 +32,8 @@ import type {
   ImageCropRequest,
   ImageEditRequest,
   ImageConversionRequest,
+  PdfConversionRequest,
+  PdfCompressionRequest,
   ImagesToPdfRequest,
   ImageResizeRequest,
   VideoConversionRequest
@@ -93,6 +95,27 @@ function isImageConversionRequest(value: unknown): value is ImageConversionReque
     ) &&
     (candidate.options === undefined || typeof candidate.options === 'object')
   )
+}
+function isPdfConversionRequest(value: unknown): value is PdfConversionRequest {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return (
+    hasSafeInputPath(candidate) &&
+    (candidate.targetFormat === 'docx' ||
+      candidate.targetFormat === 'pages' ||
+      candidate.targetFormat === 'pptx' ||
+      candidate.targetFormat === 'xlsx' ||
+      candidate.targetFormat === 'epub' ||
+      candidate.targetFormat === 'txt' ||
+      candidate.targetFormat === 'md' ||
+      candidate.targetFormat === 'jpg' ||
+      candidate.targetFormat === 'png')
+  )
+}
+function isPdfCompressionRequest(value: unknown): value is PdfCompressionRequest {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return hasSafeInputPath(candidate) && candidate.operation === 'pdf-compress'
 }
 function isVideoConversionRequest(value: unknown): value is VideoConversionRequest {
   if (!value || typeof value !== 'object') return false
@@ -576,6 +599,19 @@ app.whenReady().then(() => {
   ipcMain.handle('conversion:image', async (_, payload: unknown) => {
     if (!isImageConversionRequest(payload)) throw new Error('Invalid image conversion request.')
     return conversionManager.convertImage(payload)
+  })
+  ipcMain.handle('conversion:pdf', async (_, payload: unknown) => {
+    if (!isPdfConversionRequest(payload)) throw new Error('Invalid PDF conversion request.')
+    return conversionManager.convertPdf(payload)
+  })
+  ipcMain.handle('conversion:pdf-compress', async (_, payload: unknown) => {
+    if (!isPdfCompressionRequest(payload)) throw new Error('Invalid PDF compression request.')
+    return conversionManager.compressPdf(payload)
+  })
+  ipcMain.handle('pdf:metadata', async (_, inputPath: unknown) => {
+    if (typeof inputPath !== 'string' || !isAbsolute(inputPath) || inputPath.includes('\0'))
+      throw new Error('Invalid PDF path.')
+    return conversionManager.getPdfMetadata(inputPath)
   })
   ipcMain.handle('conversion:video', async (event, payload: unknown) => {
     if (!isVideoConversionRequest(payload)) throw new Error('Invalid video conversion request.')

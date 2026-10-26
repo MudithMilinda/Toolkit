@@ -24,6 +24,25 @@ const api = Object.freeze({
       outputSize: number
       savedPercent: number
     }>,
+  convertPdf: (payload: {
+    inputPath: string
+    targetFormat: 'docx' | 'pages' | 'pptx' | 'xlsx' | 'epub' | 'txt' | 'md' | 'jpg' | 'png'
+  }) =>
+    ipcRenderer.invoke('conversion:pdf', payload) as Promise<{
+      outputPath: string
+      originalSize: number
+      outputSize: number
+      savedPercent: number
+    }>,
+  compressPdf: (payload: { inputPath: string; operation: 'pdf-compress' }) =>
+    ipcRenderer.invoke('conversion:pdf-compress', payload) as Promise<{
+      outputPath: string
+      originalSize: number
+      outputSize: number
+      savedPercent: number
+    }>,
+  getPdfMetadata: (inputPath: string) =>
+    ipcRenderer.invoke('pdf:metadata', inputPath) as Promise<Array<{ key: string; value: string }>>,
   convertVideo: (payload: {
     inputPath: string
     targetFormat:

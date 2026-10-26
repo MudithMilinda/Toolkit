@@ -14,6 +14,7 @@ import {
   Scissors,
   SlidersHorizontal,
   Gauge,
+  LayoutGrid,
   VolumeX
 } from 'lucide-react'
 import { motion } from 'motion/react'
@@ -118,7 +119,10 @@ export default function RadialSegment({
   const [x, y] = circlePoint((R_IN + R_OUT) / 2 + 3, labelAngle)
   const labelLines = [operation.label]
   const Icon =
-    operation.id === 'compress' || operation.id === 'video-compress' || operation.id === 'zip'
+    operation.id === 'compress' ||
+    operation.id === 'video-compress' ||
+    operation.id === 'pdf-compress' ||
+    operation.id === 'zip'
       ? Archive
       : operation.id === 'send-email'
         ? Mail
@@ -130,7 +134,9 @@ export default function RadialSegment({
               ? Crop
               : operation.id === 'trim' || operation.id === 'video-trim'
                 ? Scissors
-                : operation.id === 'metadata' || operation.id === 'video-metadata'
+              : operation.id === 'metadata' ||
+                  operation.id === 'video-metadata' ||
+                  operation.id === 'pdf-metadata'
                   ? Info
                   : operation.id === 'video-mute'
                     ? VolumeX
@@ -138,8 +144,10 @@ export default function RadialSegment({
                       ? Gauge
                       : operation.id === 'video-snapshot'
                         ? Image
-                        : operation.id === 'video-split'
+                        : operation.id === 'video-split' || operation.id === 'pdf-split'
                           ? PanelTop
+                          : operation.id === 'pdf-organize'
+                            ? LayoutGrid
                           : operation.id === 'video-redact'
                             ? CaptionsOff
                             : operation.id === 'audio' ||

@@ -9,6 +9,8 @@ import AudioMetadataPanel from './components/AudioMetadataPanel'
 import AudioNormalizePanel from './components/AudioNormalizePanel'
 import AudioTrimPanel from './components/AudioTrimPanel'
 import AudioBleepPanel from './components/AudioBleepPanel'
+import PdfCompressPanel from './components/PdfCompressPanel'
+import PdfMetadataPanel from './components/PdfMetadataPanel'
 import VideoCompressPanel from './components/VideoCompressPanel'
 import VideoMetadataPanel from './components/VideoMetadataPanel'
 import VideoTrimPanel from './components/VideoTrimPanel'
@@ -44,6 +46,8 @@ function App(): React.JSX.Element {
     | 'audio-normalize'
     | 'audio-trim'
     | 'audio-bleep'
+    | 'pdf-compress'
+    | 'pdf-metadata'
     | 'video-compress'
     | 'video-metadata'
     | 'video-trim'
@@ -198,6 +202,15 @@ function App(): React.JSX.Element {
         setOptionsMode('audio-bleep')
         return
       }
+      if (nextOperation.id === 'pdf-compress') {
+        setPanelStatus(null)
+        setOptionsMode('pdf-compress')
+        return
+      }
+      if (nextOperation.id === 'pdf-metadata') {
+        setOptionsMode('pdf-metadata')
+        return
+      }
       if (nextOperation.id === 'send-email') {
         const inputPath = window.api.getPathForFile(selectedFile)
         if (!inputPath) {
@@ -211,6 +224,43 @@ function App(): React.JSX.Element {
           .catch((error: unknown) =>
             setNotice(error instanceof Error ? error.message : 'Unable to open an email composer.')
           )
+        return
+      }
+      if (
+        (nextOperation.id === 'docx' ||
+          nextOperation.id === 'pages' ||
+          nextOperation.id === 'pptx' ||
+          nextOperation.id === 'xlsx' ||
+          nextOperation.id === 'epub' ||
+          nextOperation.id === 'txt' ||
+          nextOperation.id === 'md' ||
+          nextOperation.id === 'jpg' ||
+          nextOperation.id === 'png') &&
+        getFileCategory(selectedFile.name) === 'document'
+      ) {
+        const inputPath = window.api.getPathForFile(selectedFile)
+        if (!inputPath) {
+          setNotice('The selected PDF path could not be read. Please drop the file again.')
+          return
+        }
+        setIsProcessing(true)
+        setIsClosing(true)
+        setNotice(`Converting ${selectedFile.name} to ${nextOperation.label}…`)
+        window.setTimeout(() => void window.api.closeRadialMenu(), 220)
+        void window.api
+          .convertPdf({ inputPath, targetFormat: nextOperation.id })
+          .then((result) =>
+            setNotice(`${nextOperation.label} created — ${result.outputPath.split(/[\\/]/).pop()}.`)
+          )
+          .catch((error: unknown) => {
+            setIsClosing(false)
+            setNotice(
+              error instanceof Error
+                ? error.message
+                : `PDF to ${nextOperation.label} conversion failed.`
+            )
+          })
+          .finally(() => setIsProcessing(false))
         return
       }
       if (nextOperation.id === 'pdf' && selectedFile === file && files.length > 1) {
@@ -689,9 +739,14 @@ function App(): React.JSX.Element {
                     // The window can appear before macOS lets Chromium expose a
                     // drag's file name. Resolve the target from the dropped file
                     // rather than the image placeholder displayed beforehand.
+                    const droppedToolOperations = getFileToolOperations(droppedFile.name)
+                    // RadialMenu falls back to the conversion wheel when a
+                    // file type has no Q tools. Keep the drop resolver in
+                    // sync; otherwise PDF slices are visible but resolve to
+                    // an empty action list on release.
                     const droppedOperations =
-                      dragModifier === 'command'
-                        ? getFileToolOperations(droppedFile.name)
+                      dragModifier === 'command' && droppedToolOperations.length
+                        ? droppedToolOperations
                         : getOperationsForFile(droppedFile.name)
                     const nextOperation = droppedOperations[index]
                     if (!nextOperation) {
@@ -789,6 +844,39 @@ function App(): React.JSX.Element {
                     .then(() => setPanelStatus('Bleeped copy created'))
                 }}
               />
+            )}
+            {optionsMode === 'pdf-compress' && file && !isClosing && (
+              <PdfCompressPanel
+                file={file}
+                isProcessing={isProcessing}
+                statusMessage={panelStatus}
+                onCancel={closeEditor}
+                onCompress={() => {
+                  const inputPath = window.api.getPathForFile(file)
+                  if (!inputPath) {
+                    setPanelStatus('The PDF path could not be read.')
+                    return
+                  }
+                  setIsProcessing(true)
+                  setPanelStatus('Optimizing PDF…')
+                  void window.api
+                    .compressPdf({ inputPath, operation: 'pdf-compress' })
+                    .then((result) => {
+                      const sizeNote =
+                        result.savedPercent > 0 ? ` · ${result.savedPercent}% smaller` : ''
+                      setPanelStatus(
+                        `Saved — ${result.outputPath.split(/[\\/]/).pop()}${sizeNote}`
+                      )
+                    })
+                    .catch((error: unknown) =>
+                      setPanelStatus(error instanceof Error ? error.message : 'PDF compression failed.')
+                    )
+                    .finally(() => setIsProcessing(false))
+                }}
+              />
+            )}
+            {optionsMode === 'pdf-metadata' && file && !isClosing && (
+              <PdfMetadataPanel file={file} onCancel={closeEditor} />
             )}
             {optionsMode === 'video-compress' && file && !isClosing && (
               <VideoCompressPanel

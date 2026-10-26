@@ -17,12 +17,17 @@ const operationMap: Record<FileCategory, FileOperation[]> = {
     ['jpg', 'JPG']
   ]),
   document: entries([
-    ['png', 'PNG'],
+    // Keep this order clockwise from the top of the wheel. It mirrors the
+    // document-conversion layout and leaves PDF in the centre lens.
+    ['docx', 'DOCX'],
+    ['pages', 'PAGES'],
+    ['pptx', 'PPTX'],
+    ['xlsx', 'XLSX'],
     ['jpg', 'JPG'],
-    ['merge', 'Merge'],
-    ['split', 'Split'],
-    ['compress', 'Compress'],
-    ['extract', 'Extract pages']
+    ['png', 'PNG'],
+    ['epub', 'EPUB'],
+    ['txt', 'TXT'],
+    ['md', 'MD']
   ]),
   video: entries([
     ['mp4', 'MP4'],
@@ -92,6 +97,14 @@ const audioToolOperations = entries([
   ['audio-trim', 'Trim'],
   ['audio-bleep', 'Bleep']
 ])
+const documentToolOperations = entries([
+  // Clockwise from the top: this places Compress at 12 o'clock, Metadata on
+  // the right, Split at the bottom and Organize on the left.
+  ['pdf-compress', 'Compress'],
+  ['pdf-metadata', 'Metadata'],
+  ['pdf-split', 'Split'],
+  ['pdf-organize', 'Organize']
+])
 
 export const getFileToolOperations = (filename: string): FileOperation[] =>
   getFileCategory(filename) === 'image'
@@ -100,7 +113,9 @@ export const getFileToolOperations = (filename: string): FileOperation[] =>
       ? videoToolOperations
       : getFileCategory(filename) === 'audio'
         ? audioToolOperations
-        : []
+        : getFileCategory(filename) === 'document'
+          ? documentToolOperations
+          : []
 export const formatFileSize = (bytes: number): string =>
   bytes < 1024
     ? `${bytes} B`

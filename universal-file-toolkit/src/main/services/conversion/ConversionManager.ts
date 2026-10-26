@@ -1,4 +1,4 @@
-import { readFile, rm, stat } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import type { Stats } from 'node:fs'
 import { basename, isAbsolute, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -11,6 +11,7 @@ import { FfmpegVideoConverter } from './converters/FfmpegVideoConverter'
 import { OutputManager } from './OutputManager'
 import type {
   ConversionResult,
+  DocumentTargetFormat,
   AudioCompressionRequest,
   AudioNormalizeRequest,
   AudioTrimRequest,
@@ -24,6 +25,8 @@ import type {
   ImagesToPdfRequest,
   ImageResizeRequest,
   ImageTargetFormat,
+  PdfConversionRequest,
+  PdfCompressionRequest,
   VideoCompressionRequest,
   VideoCropRequest,
   VideoSpeedRequest,
@@ -34,6 +37,90 @@ import type {
 
 const MAX_IMAGE_BYTES = 512 * 1024 * 1024
 const execFileAsync = promisify(execFile)
+
+// PDFKit is built into macOS and exposes the same text that Preview can select.
+// Keeping the script inline means Electron's production bundle has no loose
+// script asset to locate at runtime.
+const pdfTextExtractionScript = String.raw`
+ObjC.import('Foundation')
+ObjC.import('PDFKit')
+function run(argv) {
+  const filePath = $(argv[0])
+  const document = $.PDFDocument.alloc.initWithURL($.NSURL.fileURLWithPath(filePath))
+  if (!document) throw new Error('The PDF could not be opened.')
+  const pages = Number(document.pageCount)
+  const text = []
+  for (let index = 0; index < pages; index += 1) {
+    const page = document.pageAtIndex(index)
+    const pageText = page ? ObjC.unwrap(page.string) : ''
+    if (pageText) text.push(pageText)
+  }
+  return JSON.stringify(text)
+}
+`
+
+const escapeXml = (value: string): string =>
+  value.replace(/[<>&'\"]/g, (character) => {
+    const entities: Record<string, string> = {
+      '<': '&lt;',
+      '>': '&gt;',
+      '&': '&amp;',
+      "'": '&apos;',
+      '"': '&quot;'
+    }
+    return entities[character] ?? character
+  })
+
+const docxToPagesScript = String.raw`
+on run argv
+  set sourceFile to POSIX file (item 1 of argv)
+  set destinationFile to POSIX file (item 2 of argv)
+  tell application "Pages"
+    open sourceFile
+    delay 0.5
+    save front document in destinationFile
+    close front document saving no
+  end tell
+end run
+`
+
+const pdfOptimizationScript = String.raw`
+ObjC.import('Foundation')
+ObjC.import('PDFKit')
+function run(argv) {
+  const document = $.PDFDocument.alloc.initWithURL($.NSURL.fileURLWithPath($(argv[0])))
+  if (!document) throw new Error('The PDF could not be opened.')
+  if (!document.writeToURL($.NSURL.fileURLWithPath($(argv[1]))))
+    throw new Error('The optimized PDF could not be saved.')
+}
+`
+
+const pdfMetadataScript = String.raw`
+ObjC.import('Foundation')
+ObjC.import('PDFKit')
+function run(argv) {
+  const document = $.PDFDocument.alloc.initWithURL($.NSURL.fileURLWithPath($(argv[0])))
+  if (!document) throw new Error('The PDF could not be opened.')
+  const attributes = document.documentAttributes
+  const value = (attribute) => {
+    const item = attributes ? attributes.objectForKey(attribute) : null
+    const unwrapped = ObjC.unwrap(item)
+    return unwrapped === null || unwrapped === undefined ? '' : String(unwrapped)
+  }
+  return JSON.stringify({
+    pages: Number(document.pageCount),
+    encrypted: Boolean(document.isEncrypted),
+    title: value($.PDFDocumentTitleAttribute),
+    author: value($.PDFDocumentAuthorAttribute),
+    subject: value($.PDFDocumentSubjectAttribute),
+    creator: value($.PDFDocumentCreatorAttribute),
+    keywords: value($.PDFDocumentKeywordsAttribute),
+    producer: value($.PDFDocumentProducerAttribute),
+    created: value($.PDFDocumentCreationDateAttribute),
+    modified: value($.PDFDocumentModificationDateAttribute)
+  })
+}
+`
 
 /** Main-process-only image conversion coordinator. Duplicate jobs share one promise. */
 export class ConversionManager {
@@ -52,6 +139,55 @@ export class ConversionManager {
     const job = this.performImageConversion(request).finally(() => this.activeJobs.delete(key))
     this.activeJobs.set(key, job)
     return job
+  }
+
+  convertPdf(request: PdfConversionRequest): Promise<ConversionResult> {
+    return this.startJob(`${resolve(request.inputPath)}:pdf:${request.targetFormat}`, () =>
+      this.performPdfToDocx(request)
+    )
+  }
+
+  compressPdf(request: PdfCompressionRequest): Promise<ConversionResult> {
+    return this.startJob(`${resolve(request.inputPath)}:pdf-compress`, () =>
+      this.performPdfCompression(request)
+    )
+  }
+
+  async getPdfMetadata(inputPathValue: string): Promise<Array<{ key: string; value: string }>> {
+    if (!isAbsolute(inputPathValue)) throw new Error('The PDF path must be absolute.')
+    const inputPath = resolve(inputPathValue)
+    const source = await stat(inputPath)
+    if (!source.isFile() || inputPath.split('.').pop()?.toLowerCase() !== 'pdf')
+      throw new Error('Select a valid PDF file.')
+    const { stdout } = await execFileAsync(
+      '/usr/bin/osascript',
+      ['-l', 'JavaScript', '-e', pdfMetadataScript, inputPath]
+    )
+    try {
+      const metadata = JSON.parse(stdout) as Record<string, unknown>
+      const items: Array<{ key: string; value: string }> = [
+        { key: 'Pages', value: String(metadata.pages ?? '') },
+        { key: 'Encrypted', value: metadata.encrypted ? 'Yes' : 'No' },
+        { key: 'File size', value: this.formatFileSize(source.size) }
+      ]
+      const names: Array<[string, string]> = [
+        ['Title', 'title'],
+        ['Author', 'author'],
+        ['Subject', 'subject'],
+        ['Keywords', 'keywords'],
+        ['Creator', 'creator'],
+        ['Producer', 'producer'],
+        ['Created', 'created'],
+        ['Modified', 'modified']
+      ]
+      names.forEach(([key, name]) => {
+        const value = metadata[name]
+        if (typeof value === 'string' && value.trim()) items.push({ key, value })
+      })
+      return items
+    } catch (error) {
+      throw new Error('Unable to read metadata from this PDF.', { cause: error })
+    }
   }
 
   convertVideo(
@@ -716,6 +852,427 @@ export class ConversionManager {
     }
   }
 
+  private async performPdfToDocx(request: PdfConversionRequest): Promise<ConversionResult> {
+    if (process.platform !== 'darwin')
+      throw new Error('PDF to DOCX conversion is currently available on macOS.')
+    if (!isAbsolute(request.inputPath)) throw new Error('The input file path must be absolute.')
+    const inputPath = resolve(request.inputPath)
+    const source = await stat(inputPath)
+    if (!source.isFile()) throw new Error('The selected PDF is not a regular file.')
+    if (source.size === 0) throw new Error('The selected PDF is empty.')
+    if (source.size > 512 * 1024 * 1024) throw new Error('The selected PDF exceeds the 512 MB limit.')
+    if (inputPath.split('.').pop()?.toLowerCase() !== 'pdf')
+      throw new Error('Select a PDF file to convert to DOCX.')
+
+    const startedAt = Date.now()
+    const temporaryBasePath = await this.outputManager.createTemporaryPath(inputPath)
+    if (request.targetFormat === 'png' || request.targetFormat === 'jpg') {
+      const imagePath = `${temporaryBasePath}.${request.targetFormat}`
+      try {
+        await execFileAsync('/usr/bin/sips', [
+          '-s',
+          'format',
+          request.targetFormat === 'jpg' ? 'jpeg' : 'png',
+          inputPath,
+          '--out',
+          imagePath
+        ])
+        const outputPath = await this.outputManager.publishTemporaryFile(
+          imagePath,
+          inputPath,
+          request.targetFormat,
+          '-page-1'
+        )
+        const output = await stat(outputPath)
+        return this.result(
+          inputPath,
+          outputPath,
+          'pdf',
+          request.targetFormat,
+          source.size,
+          output.size,
+          startedAt
+        )
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : ''
+        throw new Error(detail || `Unable to convert the first PDF page to ${request.targetFormat}.`, {
+          cause: error
+        })
+      } finally {
+        await this.outputManager.discardTemporaryFile(imagePath)
+      }
+    }
+    const textPath = `${temporaryBasePath}.txt`
+    const markdownPath = `${temporaryBasePath}.md`
+    const docxPath = `${temporaryBasePath}.docx`
+    const pagesPath = `${temporaryBasePath}.pages`
+    const pptxPath = `${temporaryBasePath}.pptx`
+    const pptxDirectory = `${temporaryBasePath}.pptx-package`
+    const xlsxPath = `${temporaryBasePath}.xlsx`
+    const xlsxDirectory = `${temporaryBasePath}.xlsx-package`
+    const epubPath = `${temporaryBasePath}.epub`
+    const epubDirectory = `${temporaryBasePath}.epub-package`
+    try {
+      const extractedPages = await this.extractPdfTextPages(inputPath)
+      const extractedText = extractedPages.join('\n\n').trim()
+      if (!extractedText)
+        throw new Error('This PDF has no selectable text. Scanned PDFs need OCR before DOCX export.')
+      await writeFile(textPath, extractedText, 'utf8')
+      if (request.targetFormat === 'txt') {
+        const outputPath = await this.outputManager.publishTemporaryFile(
+          textPath,
+          inputPath,
+          'txt',
+          '-converted'
+        )
+        const output = await stat(outputPath)
+        return this.result(inputPath, outputPath, 'pdf', 'txt', source.size, output.size, startedAt)
+      }
+      if (request.targetFormat === 'md') {
+        const markdown = extractedPages
+          .map((page, index) => `# Page ${index + 1}\n\n${page.trim()}`)
+          .join('\n\n---\n\n')
+        await writeFile(markdownPath, markdown, 'utf8')
+        const outputPath = await this.outputManager.publishTemporaryFile(
+          markdownPath,
+          inputPath,
+          'md',
+          '-converted'
+        )
+        const output = await stat(outputPath)
+        return this.result(inputPath, outputPath, 'pdf', 'md', source.size, output.size, startedAt)
+      }
+      await execFileAsync('/usr/bin/textutil', [
+        '-convert',
+        'docx',
+        '-output',
+        docxPath,
+        textPath
+      ])
+      if (request.targetFormat === 'pages') {
+        try {
+          const pagesApp = await stat('/Applications/Pages.app')
+          if (!pagesApp.isDirectory()) throw new Error('Apple Pages is not installed.')
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : ''
+          throw new Error(
+            detail === 'Apple Pages is not installed.'
+              ? detail
+              : 'Apple Pages is required to create a .pages document. Install Pages and try again.'
+          )
+        }
+        await execFileAsync('/usr/bin/osascript', [
+          '-l',
+          'AppleScript',
+          '-e',
+          docxToPagesScript,
+          docxPath,
+          pagesPath
+        ])
+        const outputPath = await this.outputManager.publishTemporaryFile(
+          pagesPath,
+          inputPath,
+          'pages',
+          '-converted'
+        )
+        const output = await stat(outputPath)
+        return this.result(inputPath, outputPath, 'pdf', 'pages', source.size, output.size, startedAt)
+      }
+      if (request.targetFormat === 'pptx') {
+        await this.createTextPresentation(extractedPages, pptxDirectory, pptxPath)
+        const outputPath = await this.outputManager.publishTemporaryFile(
+          pptxPath,
+          inputPath,
+          'pptx',
+          '-converted'
+        )
+        const output = await stat(outputPath)
+        return this.result(inputPath, outputPath, 'pdf', 'pptx', source.size, output.size, startedAt)
+      }
+      if (request.targetFormat === 'xlsx') {
+        await this.createTextSpreadsheet(extractedPages, xlsxDirectory, xlsxPath)
+        const outputPath = await this.outputManager.publishTemporaryFile(
+          xlsxPath,
+          inputPath,
+          'xlsx',
+          '-converted'
+        )
+        const output = await stat(outputPath)
+        return this.result(inputPath, outputPath, 'pdf', 'xlsx', source.size, output.size, startedAt)
+      }
+      if (request.targetFormat === 'epub') {
+        await this.createEpub(extractedPages, epubDirectory, epubPath)
+        const outputPath = await this.outputManager.publishTemporaryFile(
+          epubPath,
+          inputPath,
+          'epub',
+          '-converted'
+        )
+        const output = await stat(outputPath)
+        return this.result(inputPath, outputPath, 'pdf', 'epub', source.size, output.size, startedAt)
+      }
+      const outputPath = await this.outputManager.publishTemporaryFile(
+        docxPath,
+        inputPath,
+        'docx',
+        '-converted'
+      )
+      const output = await stat(outputPath)
+      return this.result(inputPath, outputPath, 'pdf', 'docx', source.size, output.size, startedAt)
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : ''
+      throw new Error(detail || 'Unable to convert this PDF to DOCX.', { cause: error })
+    } finally {
+      await this.outputManager.discardTemporaryFile(textPath)
+      await this.outputManager.discardTemporaryFile(markdownPath)
+      await this.outputManager.discardTemporaryFile(docxPath)
+      await this.outputManager.discardTemporaryFile(pagesPath)
+      await this.outputManager.discardTemporaryFile(pptxPath)
+      await this.outputManager.discardTemporaryFile(pptxDirectory)
+      await this.outputManager.discardTemporaryFile(xlsxPath)
+      await this.outputManager.discardTemporaryFile(xlsxDirectory)
+      await this.outputManager.discardTemporaryFile(epubPath)
+      await this.outputManager.discardTemporaryFile(epubDirectory)
+    }
+  }
+
+  private async performPdfCompression(request: PdfCompressionRequest): Promise<ConversionResult> {
+    if (process.platform !== 'darwin')
+      throw new Error('PDF compression is currently available on macOS.')
+    if (!isAbsolute(request.inputPath)) throw new Error('The input file path must be absolute.')
+    const inputPath = resolve(request.inputPath)
+    const source = await stat(inputPath)
+    if (!source.isFile()) throw new Error('The selected PDF is not a regular file.')
+    if (source.size === 0) throw new Error('The selected PDF is empty.')
+    if (source.size > 512 * 1024 * 1024) throw new Error('The selected PDF exceeds the 512 MB limit.')
+    if (inputPath.split('.').pop()?.toLowerCase() !== 'pdf')
+      throw new Error('Select a PDF file to compress.')
+    const startedAt = Date.now()
+    const temporaryPath = `${await this.outputManager.createTemporaryPath(inputPath)}.pdf`
+    try {
+      await execFileAsync('/usr/bin/osascript', [
+        '-l',
+        'JavaScript',
+        '-e',
+        pdfOptimizationScript,
+        inputPath,
+        temporaryPath
+      ])
+      const outputPath = await this.outputManager.publishTemporaryFile(
+        temporaryPath,
+        inputPath,
+        'pdf',
+        '-compressed'
+      )
+      const output = await stat(outputPath)
+      return this.result(inputPath, outputPath, 'pdf', 'pdf', source.size, output.size, startedAt)
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : ''
+      throw new Error(detail || 'Unable to optimize this PDF.', { cause: error })
+    } finally {
+      await this.outputManager.discardTemporaryFile(temporaryPath)
+    }
+  }
+
+  private async extractPdfTextPages(inputPath: string): Promise<string[]> {
+    const { stdout } = await execFileAsync(
+      '/usr/bin/osascript',
+      ['-l', 'JavaScript', '-e', pdfTextExtractionScript, inputPath],
+      { maxBuffer: 32 * 1024 * 1024 }
+    )
+    try {
+      const pages: unknown = JSON.parse(stdout)
+      if (!Array.isArray(pages) || !pages.every((page) => typeof page === 'string'))
+        throw new Error('Invalid PDF text output.')
+      return pages.filter((page) => page.trim())
+    } catch (error) {
+      throw new Error('Unable to read text from this PDF.', { cause: error })
+    }
+  }
+
+  private async createTextPresentation(
+    pages: string[],
+    packageDirectory: string,
+    outputPath: string
+  ): Promise<void> {
+    await mkdir(join(packageDirectory, '_rels'), { recursive: true })
+    await mkdir(join(packageDirectory, 'ppt', '_rels'), { recursive: true })
+    await mkdir(join(packageDirectory, 'ppt', 'slides'), { recursive: true })
+    const slideIds = pages
+      .map((_, index) => `<p:sldId id="${256 + index}" r:id="rId${index + 1}"/>`)
+      .join('')
+    const slideRelationships = pages
+      .map(
+        (_, index) =>
+          `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${index + 1}.xml"/>`
+      )
+      .join('')
+    const contentOverrides = pages
+      .map(
+        (_, index) =>
+          `<Override PartName="/ppt/slides/slide${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`
+      )
+      .join('')
+    await Promise.all([
+      writeFile(
+        join(packageDirectory, '[Content_Types].xml'),
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>${contentOverrides}</Types>`
+      ),
+      writeFile(
+        join(packageDirectory, '_rels', '.rels'),
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/></Relationships>`
+      ),
+      writeFile(
+        join(packageDirectory, 'ppt', 'presentation.xml'),
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:sldIdLst>${slideIds}</p:sldIdLst><p:sldSz cx="12192000" cy="6858000" type="screen16x9"/><p:notesSz cx="6858000" cy="9144000"/></p:presentation>`
+      ),
+      writeFile(
+        join(packageDirectory, 'ppt', '_rels', 'presentation.xml.rels'),
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${slideRelationships}</Relationships>`
+      )
+    ])
+    await Promise.all(
+      pages.map((page, index) =>
+        writeFile(join(packageDirectory, 'ppt', 'slides', `slide${index + 1}.xml`), this.pptxSlide(page, index + 1))
+      )
+    )
+    await execFileAsync('/usr/bin/zip', ['-q', '-r', outputPath, '.'], { cwd: packageDirectory })
+  }
+
+  private pptxSlide(pageText: string, pageNumber: number): string {
+    const paragraphs = pageText
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .slice(0, 80)
+      .map(
+        (line) =>
+          `<a:p><a:r><a:rPr lang="en-US" sz="1800"/><a:t>${escapeXml(line)}</a:t></a:r></a:p>`
+      )
+      .join('')
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:sp><p:nvSpPr><p:cNvPr id="2" name="Title"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="685800" y="457200"/><a:ext cx="10820400" cy="685800"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr><p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" sz="3000" b="1"/><a:t>PDF page ${pageNumber}</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:nvSpPr><p:cNvPr id="3" name="Text"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="685800" y="1371600"/><a:ext cx="10820400" cy="5029200"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr><p:txBody><a:bodyPr wrap="square"/><a:lstStyle/>${paragraphs}</p:txBody></p:sp></p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`
+  }
+
+  private async createTextSpreadsheet(
+    pages: string[],
+    packageDirectory: string,
+    outputPath: string
+  ): Promise<void> {
+    await mkdir(join(packageDirectory, '_rels'), { recursive: true })
+    await mkdir(join(packageDirectory, 'xl', '_rels'), { recursive: true })
+    await mkdir(join(packageDirectory, 'xl', 'worksheets'), { recursive: true })
+    const sheets = pages
+      .map(
+        (_, index) =>
+          `<sheet name="Page ${index + 1}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`
+      )
+      .join('')
+    const relationships = pages
+      .map(
+        (_, index) =>
+          `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`
+      )
+      .join('')
+    const contentOverrides = pages
+      .map(
+        (_, index) =>
+          `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`
+      )
+      .join('')
+    await Promise.all([
+      writeFile(
+        join(packageDirectory, '[Content_Types].xml'),
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${contentOverrides}</Types>`
+      ),
+      writeFile(
+        join(packageDirectory, '_rels', '.rels'),
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`
+      ),
+      writeFile(
+        join(packageDirectory, 'xl', 'workbook.xml'),
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets}</sheets></workbook>`
+      ),
+      writeFile(
+        join(packageDirectory, 'xl', '_rels', 'workbook.xml.rels'),
+        `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${relationships}</Relationships>`
+      )
+    ])
+    await Promise.all(
+      pages.map((page, index) => {
+        const rows = page
+          .split(/\r?\n/)
+          .filter(Boolean)
+          .slice(0, 100_000)
+          .map(
+            (line, lineIndex) =>
+              `<row r="${lineIndex + 1}"><c r="A${lineIndex + 1}" t="inlineStr"><is><t xml:space="preserve">${escapeXml(line)}</t></is></c></row>`
+          )
+          .join('')
+        return writeFile(
+          join(packageDirectory, 'xl', 'worksheets', `sheet${index + 1}.xml`),
+          `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView workbookViewId="0"/></sheetViews><cols><col min="1" max="1" width="80" customWidth="1"/></cols><sheetData>${rows}</sheetData></worksheet>`
+        )
+      })
+    )
+    await execFileAsync('/usr/bin/zip', ['-q', '-r', outputPath, '.'], { cwd: packageDirectory })
+  }
+
+  private async createEpub(
+    pages: string[],
+    packageDirectory: string,
+    outputPath: string
+  ): Promise<void> {
+    await mkdir(join(packageDirectory, 'META-INF'), { recursive: true })
+    await mkdir(join(packageDirectory, 'OEBPS', 'text'), { recursive: true })
+    const manifest = pages
+      .map(
+        (_, index) =>
+          `<item id="chapter-${index + 1}" href="text/chapter-${index + 1}.xhtml" media-type="application/xhtml+xml"/>`
+      )
+      .join('')
+    const spine = pages
+      .map((_, index) => `<itemref idref="chapter-${index + 1}"/>`)
+      .join('')
+    const navigation = pages
+      .map(
+        (_, index) =>
+          `<li><a href="text/chapter-${index + 1}.xhtml">Page ${index + 1}</a></li>`
+      )
+      .join('')
+    await Promise.all([
+      writeFile(join(packageDirectory, 'mimetype'), 'application/epub+zip'),
+      writeFile(
+        join(packageDirectory, 'META-INF', 'container.xml'),
+        `<?xml version="1.0" encoding="UTF-8"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`
+      ),
+      writeFile(
+        join(packageDirectory, 'OEBPS', 'content.opf'),
+        `<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="book-id" xml:lang="en"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">urn:uuid:${randomUUID()}</dc:identifier><dc:title>Converted PDF</dc:title><dc:language>en</dc:language></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>${manifest}</manifest><spine>${spine}</spine></package>`
+      ),
+      writeFile(
+        join(packageDirectory, 'OEBPS', 'nav.xhtml'),
+        `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Contents</title></head><body><nav epub:type="toc" xmlns:epub="http://www.idpf.org/2007/ops"><h1>Contents</h1><ol>${navigation}</ol></nav></body></html>`
+      )
+    ])
+    await Promise.all(
+      pages.map((page, index) => {
+        const paragraphs = page
+          .split(/\r?\n/)
+          .filter(Boolean)
+          .map((line) => `<p>${escapeXml(line)}</p>`)
+          .join('')
+        return writeFile(
+          join(packageDirectory, 'OEBPS', 'text', `chapter-${index + 1}.xhtml`),
+          `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html><html xmlns="http://www.w3.org/1999/xhtml"><head><title>Page ${index + 1}</title></head><body><h1>Page ${index + 1}</h1>${paragraphs}</body></html>`
+        )
+      })
+    )
+    // EPUB requires an uncompressed mimetype file as the first ZIP entry.
+    await execFileAsync('/usr/bin/zip', ['-X0q', outputPath, 'mimetype'], { cwd: packageDirectory })
+    await execFileAsync('/usr/bin/zip', ['-Xrq', outputPath, 'META-INF', 'OEBPS'], {
+      cwd: packageDirectory
+    })
+  }
+
   private async performResize(request: ImageResizeRequest): Promise<ConversionResult> {
     if (!request.width && !request.height)
       throw new Error('Enter a width or height before resizing.')
@@ -970,7 +1527,7 @@ export class ConversionManager {
     inputPath: string,
     outputPath: string,
     sourceFormat: string,
-    targetFormat: ImageTargetFormat | VideoTargetFormat | ArchiveTargetFormat,
+    targetFormat: ImageTargetFormat | VideoTargetFormat | ArchiveTargetFormat | DocumentTargetFormat,
     originalSize: number,
     outputSize: number,
     startedAt: number
@@ -988,5 +1545,11 @@ export class ConversionManager {
       startedAt,
       completedAt: Date.now()
     }
+  }
+
+  private formatFileSize(bytes: number): string {
+    return bytes < 1024 * 1024
+      ? `${Math.max(1, Math.round(bytes / 1024))} KB`
+      : `${(bytes / 1024 ** 2).toFixed(1)} MB`
   }
 }
