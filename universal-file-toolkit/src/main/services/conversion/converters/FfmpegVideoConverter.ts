@@ -15,6 +15,26 @@ export class FfmpegVideoConverter {
     await this.writeAtomically(outputPath, (target) => this.encodePreview(inputPath, target))
   }
 
+  async createAudioPreview(inputPath: string, outputPath: string): Promise<void> {
+    if (!ffmpegPath) throw new Error('The bundled FFmpeg binary is unavailable for this computer.')
+    await this.runWithProgress(
+      [
+        '-i',
+        inputPath,
+        '-map',
+        '0:a:0?',
+        '-vn',
+        '-c:a',
+        'libmp3lame',
+        '-b:a',
+        '128k',
+        '-y',
+        outputPath
+      ],
+      null
+    )
+  }
+
   private async encodePoster(inputPath: string, outputPath: string): Promise<void> {
     if (!ffmpegPath) throw new Error('The bundled FFmpeg binary is unavailable for this computer.')
     // FFmpeg auto-rotates by default (phone videos with rotation metadata come out upright),
@@ -490,6 +510,178 @@ export class FfmpegVideoConverter {
       durationMs,
       onProgress
     )
+  }
+
+  async compressAudio(
+    inputPath: string,
+    outputPath: string,
+    bitrateKbps: 96 | 192,
+    onProgress?: (percent: number) => void
+  ): Promise<void> {
+    if (!ffmpegPath) throw new Error('The bundled FFmpeg binary is unavailable for this computer.')
+    const durationMs = await this.readDuration(inputPath)
+    await this.runWithProgress(
+      [
+        '-i',
+        inputPath,
+        '-map',
+        '0:a:0?',
+        '-vn',
+        '-sn',
+        '-dn',
+        '-c:a',
+        'libmp3lame',
+        '-b:a',
+        `${bitrateKbps}k`,
+        '-progress',
+        'pipe:2',
+        '-nostats',
+        '-y',
+        outputPath
+      ],
+      durationMs,
+      onProgress
+    )
+  }
+
+  async normalizeAudio(
+    inputPath: string,
+    outputPath: string,
+    options: { targetLufs: number; loudnessRange: number; truePeak: number },
+    onProgress?: (percent: number) => void
+  ): Promise<void> {
+    if (!ffmpegPath) throw new Error('The bundled FFmpeg binary is unavailable for this computer.')
+    const durationMs = await this.readDuration(inputPath)
+    const baseFilter = `loudnorm=I=${options.targetLufs}:LRA=${options.loudnessRange}:TP=${options.truePeak}`
+    const measured = await this.analyzeLoudness(inputPath, baseFilter)
+    // A measured second pass makes the three controls precise rather than only
+    // estimating their effect from the audio as it is being encoded.
+    const filter = measured
+      ? `${baseFilter}:measured_I=${measured.input_i}:measured_LRA=${measured.input_lra}:measured_TP=${measured.input_tp}:measured_thresh=${measured.input_thresh}:offset=${measured.target_offset}:linear=true`
+      : baseFilter
+    await this.runWithProgress(
+      [
+        '-i',
+        inputPath,
+        '-map',
+        '0:a:0?',
+        '-vn',
+        '-sn',
+        '-dn',
+        '-af',
+        filter,
+        '-c:a',
+        'libmp3lame',
+        '-q:a',
+        '2',
+        '-progress',
+        'pipe:2',
+        '-nostats',
+        '-y',
+        outputPath
+      ],
+      durationMs,
+      onProgress
+    )
+  }
+
+  async trimAudio(
+    inputPath: string,
+    outputPath: string,
+    startSeconds: number,
+    endSeconds: number,
+    onProgress?: (percent: number) => void
+  ): Promise<void> {
+    if (!ffmpegPath) throw new Error('The bundled FFmpeg binary is unavailable for this computer.')
+    const outputDuration = endSeconds - startSeconds
+    await this.runWithProgress(
+      [
+        '-ss',
+        String(startSeconds),
+        '-i',
+        inputPath,
+        '-map',
+        '0:a:0?',
+        '-vn',
+        '-t',
+        String(outputDuration),
+        '-c:a',
+        'libmp3lame',
+        '-q:a',
+        '2',
+        '-progress',
+        'pipe:2',
+        '-nostats',
+        '-y',
+        outputPath
+      ],
+      outputDuration * 1000,
+      onProgress
+    )
+  }
+  async bleepAudio(inputPath: string, outputPath: string, start: number, end: number, onProgress?: (percent: number) => void): Promise<void> {
+    if (!ffmpegPath) throw new Error('The bundled FFmpeg binary is unavailable for this computer.')
+    const durationMs = await this.readDuration(inputPath)
+    const between = `between(t\\,${start}\\,${end})`
+    const filter = `[0:a]volume=enable='${between}':volume=0[base];[1:a]volume=enable='not(${between})':volume=0[tone];[base][tone]amix=inputs=2:normalize=0[out]`
+    await this.runWithProgress(['-i', inputPath, '-f', 'lavfi', '-i', 'sine=frequency=1000:sample_rate=44100', '-filter_complex', filter, '-map', '[out]', '-t', String((durationMs ?? 0) / 1000), '-c:a', 'libmp3lame', '-q:a', '2', '-progress', 'pipe:2', '-nostats', '-y', outputPath], durationMs, onProgress)
+  }
+
+  private async analyzeLoudness(
+    inputPath: string,
+    filter: string
+  ): Promise<
+    | {
+        input_i: string
+        input_lra: string
+        input_tp: string
+        input_thresh: string
+        target_offset: string
+      }
+    | undefined
+  > {
+    if (!ffmpegPath) return undefined
+    try {
+      const { stderr } = await execFileAsync(
+        ffmpegPath,
+        [
+          '-hide_banner',
+          '-i',
+          inputPath,
+          '-map',
+          '0:a:0?',
+          '-vn',
+          '-af',
+          `${filter}:print_format=json`,
+          '-f',
+          'null',
+          '-'
+        ],
+        { maxBuffer: 512 * 1024 }
+      )
+      const report = stderr.match(/\{\s*"input_i"[\s\S]*?\}/)?.[0]
+      if (!report) return undefined
+      const values = JSON.parse(report) as Record<string, unknown>
+      const required = [
+        'input_i',
+        'input_lra',
+        'input_tp',
+        'input_thresh',
+        'target_offset'
+      ] as const
+      if (!required.every((key) => typeof values[key] === 'string')) return undefined
+      return {
+        input_i: values.input_i as string,
+        input_lra: values.input_lra as string,
+        input_tp: values.input_tp as string,
+        input_thresh: values.input_thresh as string,
+        target_offset: values.target_offset as string
+      }
+    } catch {
+      // Some unusual media streams cannot be analysed, but FFmpeg's one-pass
+      // loudnorm remains safe and is preferable to rejecting the export.
+      return undefined
+    }
   }
 
   async convert(

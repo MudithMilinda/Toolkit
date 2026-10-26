@@ -2,6 +2,7 @@ declare global {
   interface Window {
     api: {
       closeRadialMenu: () => Promise<void>
+      notifyRadialMenuReady: () => void
       notifyDropReceived: () => void
       composeEmail: (inputPath: string) => Promise<void>
       getPathForFile: (file: File) => string
@@ -48,9 +49,44 @@ declare global {
         outputSize: number
         savedPercent: number
       }>
+      compressAudio: (payload: {
+        inputPath: string
+        operation: 'audio-compress'
+        bitrateKbps: 96 | 192
+      }) => Promise<{
+        outputPath: string
+        originalSize: number
+        outputSize: number
+        savedPercent: number
+      }>
+      normalizeAudio: (payload: {
+        inputPath: string
+        operation: 'audio-normalize'
+        targetLufs: number
+        loudnessRange: number
+        truePeak: number
+      }) => Promise<{
+        outputPath: string
+        originalSize: number
+        outputSize: number
+        savedPercent: number
+      }>
+      trimAudio: (payload: {
+        inputPath: string
+        operation: 'audio-trim'
+        startSeconds: number
+        endSeconds: number
+      }) => Promise<{
+        outputPath: string
+        originalSize: number
+        outputSize: number
+        savedPercent: number
+      }>
+      bleepAudio: (payload: { inputPath: string; operation: 'audio-bleep'; startSeconds: number; endSeconds: number }) => Promise<{ outputPath: string }>
       getVideoMetadata: (inputPath: string) => Promise<Array<{ key: string; value: string }>>
       getVideoSourceUrl: (inputPath: string) => Promise<string>
       getVideoPoster: (inputPath: string) => Promise<string>
+      getAudioSourceUrl: (inputPath: string) => Promise<string>
       muteVideo: (inputPath: string) => Promise<{
         outputPath: string
         originalSize: number

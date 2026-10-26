@@ -3,6 +3,7 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 // The renderer receives only the two fixed, capability-scoped operations it needs.
 const api = Object.freeze({
   closeRadialMenu: (): Promise<void> => ipcRenderer.invoke('radial-menu:close'),
+  notifyRadialMenuReady: (): void => ipcRenderer.send('radial-menu:ready'),
   notifyDropReceived: (): void => ipcRenderer.send('radial-menu:drop-received'),
   composeEmail: (inputPath: string): Promise<void> =>
     ipcRenderer.invoke('email:compose', inputPath),
@@ -57,6 +58,43 @@ const api = Object.freeze({
       outputSize: number
       savedPercent: number
     }>,
+  compressAudio: (payload: {
+    inputPath: string
+    operation: 'audio-compress'
+    bitrateKbps: 96 | 192
+  }) =>
+    ipcRenderer.invoke('conversion:audio-compress', payload) as Promise<{
+      outputPath: string
+      originalSize: number
+      outputSize: number
+      savedPercent: number
+    }>,
+  normalizeAudio: (payload: {
+    inputPath: string
+    operation: 'audio-normalize'
+    targetLufs: number
+    loudnessRange: number
+    truePeak: number
+  }) =>
+    ipcRenderer.invoke('conversion:audio-normalize', payload) as Promise<{
+      outputPath: string
+      originalSize: number
+      outputSize: number
+      savedPercent: number
+    }>,
+  trimAudio: (payload: {
+    inputPath: string
+    operation: 'audio-trim'
+    startSeconds: number
+    endSeconds: number
+  }) =>
+    ipcRenderer.invoke('conversion:audio-trim', payload) as Promise<{
+      outputPath: string
+      originalSize: number
+      outputSize: number
+      savedPercent: number
+    }>,
+  bleepAudio: (payload: { inputPath: string; operation: 'audio-bleep'; startSeconds: number; endSeconds: number }) => ipcRenderer.invoke('conversion:audio-bleep', payload) as Promise<{ outputPath: string }>,
   getVideoMetadata: (inputPath: string) =>
     ipcRenderer.invoke('video:metadata', inputPath) as Promise<
       Array<{ key: string; value: string }>
@@ -65,6 +103,8 @@ const api = Object.freeze({
     ipcRenderer.invoke('video:source-url', inputPath) as Promise<string>,
   getVideoPoster: (inputPath: string) =>
     ipcRenderer.invoke('video:poster', inputPath) as Promise<string>,
+  getAudioSourceUrl: (inputPath: string) =>
+    ipcRenderer.invoke('audio:source-url', inputPath) as Promise<string>,
   muteVideo: (inputPath: string) =>
     ipcRenderer.invoke('conversion:video-mute', inputPath) as Promise<{
       outputPath: string

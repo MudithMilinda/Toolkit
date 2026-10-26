@@ -23,6 +23,10 @@ import icon from '../../resources/icon.png?asset'
 import { createNativeIntegration } from './native-integration'
 import { ConversionManager } from './services/conversion/ConversionManager'
 import type {
+  AudioCompressionRequest,
+  AudioNormalizeRequest,
+  AudioTrimRequest,
+  AudioBleepRequest,
   ImageCompressionRequest,
   ImageBackgroundRemovalRequest,
   ImageCropRequest,
@@ -40,6 +44,7 @@ const conversionManager = new ConversionManager()
 const execFileAsync = promisify(execFile)
 let nativeDismissTimer: ReturnType<typeof setTimeout> | null = null
 let nativeDragCandidateVisible = false
+let pendingRadialMenuFocus: boolean | null = null
 const localMediaSources = new Map<string, string>()
 // The crop editor needs room for a comfortably sized preview and its controls.
 const MENU_SIZE = 660
@@ -62,8 +67,12 @@ protocol.registerSchemesAsPrivileged([
   }
 ])
 
-const videoMimeType = (inputPath: string): string => {
+const mediaMimeType = (inputPath: string): string => {
   const extension = inputPath.split('.').pop()?.toLowerCase()
+  if (extension === 'mp3') return 'audio/mpeg'
+  if (extension === 'wav') return 'audio/wav'
+  if (extension === 'ogg') return 'audio/ogg'
+  if (extension === 'opus') return 'audio/opus'
   if (extension === 'mov') return 'video/quicktime'
   if (extension === 'webm') return 'video/webm'
   if (extension === 'mkv') return 'video/x-matroska'
@@ -127,6 +136,47 @@ function isVideoCompressionRequest(value: unknown): value is {
         candidate.maxDimension >= 240 &&
         candidate.maxDimension <= 7680))
   )
+}
+function isAudioCompressionRequest(value: unknown): value is AudioCompressionRequest {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return (
+    hasSafeInputPath(candidate) &&
+    candidate.operation === 'audio-compress' &&
+    (candidate.bitrateKbps === 96 || candidate.bitrateKbps === 192)
+  )
+}
+function isAudioNormalizeRequest(value: unknown): value is AudioNormalizeRequest {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  const numberInRange = (value: unknown, min: number, max: number): value is number =>
+    typeof value === 'number' && Number.isFinite(value) && value >= min && value <= max
+  return (
+    hasSafeInputPath(candidate) &&
+    candidate.operation === 'audio-normalize' &&
+    numberInRange(candidate.targetLufs, -30, -5) &&
+    numberInRange(candidate.loudnessRange, 1, 20) &&
+    numberInRange(candidate.truePeak, -9, 0)
+  )
+}
+function isAudioTrimRequest(value: unknown): value is AudioTrimRequest {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return (
+    hasSafeInputPath(candidate) &&
+    candidate.operation === 'audio-trim' &&
+    typeof candidate.startSeconds === 'number' &&
+    typeof candidate.endSeconds === 'number' &&
+    Number.isFinite(candidate.startSeconds) &&
+    Number.isFinite(candidate.endSeconds) &&
+    candidate.startSeconds >= 0 &&
+    candidate.endSeconds > candidate.startSeconds
+  )
+}
+function isAudioBleepRequest(value: unknown): value is AudioBleepRequest {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return candidate.operation === 'audio-bleep' && isAudioTrimRequest({ ...candidate, operation: 'audio-trim' })
 }
 function isVideoTrimRequest(value: unknown): value is {
   inputPath: string
@@ -317,6 +367,9 @@ function isImageBackgroundRemovalRequest(value: unknown): value is ImageBackgrou
 
 function showRadialMenu(focus = true): void {
   if (!radialWindow) return
+  // A new drag can start during the old panel's close animation. Hide the
+  // reused native window first so its previous React frame can never flash.
+  radialWindow.hide()
   const cursor = screen.getCursorScreenPoint()
   const display = screen.getDisplayNearestPoint(cursor)
   const { x, y, width, height } = display.workArea
@@ -329,12 +382,9 @@ function showRadialMenu(focus = true): void {
       Math.min(Math.max(cursor.y - MENU_SIZE / 2, y + padding), y + height - MENU_SIZE - padding)
     )
   )
-  if (focus) {
-    radialWindow.show()
-    radialWindow.focus()
-  } else {
-    radialWindow.showInactive()
-  }
+  // Do not reveal the reused renderer before it has discarded the previous
+  // editor. Otherwise a stale panel can flash briefly before the wheel.
+  pendingRadialMenuFocus = focus
   radialWindow.webContents.send('radial-menu:opened')
 }
 
@@ -443,7 +493,7 @@ app.whenReady().then(() => {
     return new Response(stream as unknown as BodyInit, {
       status: match ? 206 : 200,
       headers: {
-        'Content-Type': videoMimeType(inputPath),
+        'Content-Type': mediaMimeType(inputPath),
         'Accept-Ranges': 'bytes',
         'Content-Length': String(end - start + 1),
         ...(match ? { 'Content-Range': `bytes ${start}-${end}/${total}` } : {})
@@ -512,6 +562,17 @@ app.whenReady().then(() => {
     // Once the file is dropped, editor inputs (such as Text) must receive keys.
     radialWindow?.focus()
   })
+  ipcMain.on('radial-menu:ready', () => {
+    if (!radialWindow || pendingRadialMenuFocus === null) return
+    const focus = pendingRadialMenuFocus
+    pendingRadialMenuFocus = null
+    if (focus) {
+      radialWindow.show()
+      radialWindow.focus()
+    } else {
+      radialWindow.showInactive()
+    }
+  })
   ipcMain.handle('conversion:image', async (_, payload: unknown) => {
     if (!isImageConversionRequest(payload)) throw new Error('Invalid image conversion request.')
     return conversionManager.convertImage(payload)
@@ -528,6 +589,25 @@ app.whenReady().then(() => {
       event.sender.send('conversion:video-progress', percent)
     )
   })
+  ipcMain.handle('conversion:audio-compress', async (event, payload: unknown) => {
+    if (!isAudioCompressionRequest(payload)) throw new Error('Invalid audio compression request.')
+    return conversionManager.compressAudio(payload, (percent) =>
+      event.sender.send('conversion:video-progress', percent)
+    )
+  })
+  ipcMain.handle('conversion:audio-normalize', async (event, payload: unknown) => {
+    if (!isAudioNormalizeRequest(payload)) throw new Error('Invalid audio normalization request.')
+    return conversionManager.normalizeAudio(payload, (percent) =>
+      event.sender.send('conversion:video-progress', percent)
+    )
+  })
+  ipcMain.handle('conversion:audio-trim', async (event, payload: unknown) => {
+    if (!isAudioTrimRequest(payload)) throw new Error('Invalid audio trim request.')
+    return conversionManager.trimAudio(payload, (percent) =>
+      event.sender.send('conversion:video-progress', percent)
+    )
+  })
+  ipcMain.handle('conversion:audio-bleep', async (event, payload: unknown) => { if (!isAudioBleepRequest(payload)) throw new Error('Invalid audio bleep request.'); return conversionManager.bleepAudio(payload, (percent) => event.sender.send('conversion:video-progress', percent)) })
   ipcMain.handle('conversion:video-mute', async (event, inputPath: unknown) => {
     if (typeof inputPath !== 'string' || !isAbsolute(inputPath) || inputPath.includes('\0'))
       throw new Error('Invalid video path.')
@@ -572,6 +652,14 @@ app.whenReady().then(() => {
     if (typeof inputPath !== 'string' || !isAbsolute(inputPath) || inputPath.includes('\0'))
       throw new Error('Invalid video path.')
     return conversionManager.createVideoPoster(inputPath)
+  })
+  ipcMain.handle('audio:source-url', async (_, inputPath: unknown) => {
+    if (typeof inputPath !== 'string' || !isAbsolute(inputPath) || inputPath.includes('\0'))
+      throw new Error('Invalid audio path.')
+    const path = await conversionManager.createAudioPreview(resolve(inputPath))
+    const token = randomUUID()
+    localMediaSources.set(token, path)
+    return `toolkit-media://${token}/${encodeURIComponent(basename(path))}`
   })
   ipcMain.handle('conversion:archive', async (_, inputPaths: unknown) => {
     if (

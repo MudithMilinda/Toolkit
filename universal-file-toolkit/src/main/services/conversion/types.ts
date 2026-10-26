@@ -30,6 +30,25 @@ export interface VideoCompressionRequest {
   /** Longest output edge, preserving the video's aspect ratio. */
   maxDimension?: number
 }
+export interface AudioCompressionRequest {
+  inputPath: string
+  operation: 'audio-compress'
+  bitrateKbps: 96 | 192
+}
+export interface AudioNormalizeRequest {
+  inputPath: string
+  operation: 'audio-normalize'
+  targetLufs: number
+  loudnessRange: number
+  truePeak: number
+}
+export interface AudioTrimRequest {
+  inputPath: string
+  operation: 'audio-trim'
+  startSeconds: number
+  endSeconds: number
+}
+export interface AudioBleepRequest { inputPath: string; operation: 'audio-bleep'; startSeconds: number; endSeconds: number }
 export interface VideoTrimRequest {
   inputPath: string
   operation: 'video-trim'

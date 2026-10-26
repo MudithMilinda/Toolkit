@@ -11,6 +11,10 @@ import { FfmpegVideoConverter } from './converters/FfmpegVideoConverter'
 import { OutputManager } from './OutputManager'
 import type {
   ConversionResult,
+  AudioCompressionRequest,
+  AudioNormalizeRequest,
+  AudioTrimRequest,
+  AudioBleepRequest,
   ArchiveTargetFormat,
   ImageBackgroundRemovalRequest,
   ImageCompressionRequest,
@@ -39,6 +43,7 @@ export class ConversionManager {
   private readonly activeJobs = new Map<string, Promise<ConversionResult>>()
   /** Browser-preview proxies are reused by Crop, Trim and Speed panels. */
   private readonly videoPreviews = new Map<string, Promise<string>>()
+  private readonly audioPreviews = new Map<string, Promise<string>>()
 
   convertImage(request: ImageConversionRequest): Promise<ConversionResult> {
     const key = `${resolve(request.inputPath)}:${request.targetFormat}`
@@ -66,6 +71,39 @@ export class ConversionManager {
       `${resolve(request.inputPath)}:video-compress:${request.quality}:${request.maxDimension ?? ''}`,
       () => this.performVideoCompression(request, onProgress)
     )
+  }
+
+  compressAudio(
+    request: AudioCompressionRequest,
+    onProgress?: (percent: number) => void
+  ): Promise<ConversionResult> {
+    return this.startJob(
+      `${resolve(request.inputPath)}:audio-compress:${request.bitrateKbps}`,
+      () => this.performAudioCompression(request, onProgress)
+    )
+  }
+
+  normalizeAudio(
+    request: AudioNormalizeRequest,
+    onProgress?: (percent: number) => void
+  ): Promise<ConversionResult> {
+    return this.startJob(
+      `${resolve(request.inputPath)}:audio-normalize:${request.targetLufs}:${request.loudnessRange}:${request.truePeak}`,
+      () => this.performAudioNormalize(request, onProgress)
+    )
+  }
+
+  trimAudio(
+    request: AudioTrimRequest,
+    onProgress?: (percent: number) => void
+  ): Promise<ConversionResult> {
+    return this.startJob(
+      `${resolve(request.inputPath)}:audio-trim:${request.startSeconds}:${request.endSeconds}`,
+      () => this.performAudioTrim(request, onProgress)
+    )
+  }
+  bleepAudio(request: AudioBleepRequest, onProgress?: (percent: number) => void): Promise<ConversionResult> {
+    return this.startJob(`${resolve(request.inputPath)}:audio-bleep:${request.startSeconds}:${request.endSeconds}`, () => this.performAudioBleep(request, onProgress))
   }
 
   async getVideoMetadata(inputPathValue: string): Promise<Array<{ key: string; value: string }>> {
@@ -107,6 +145,27 @@ export class ConversionManager {
     } finally {
       await rm(posterPath, { force: true }).catch(() => undefined)
     }
+  }
+
+  async createAudioPreview(inputPathValue: string): Promise<string> {
+    const { inputPath, source } = await this.prepareMediaInput(inputPathValue)
+    const cacheKey = `${inputPath}:${source.size}:${source.mtimeMs}`
+    const existing = this.audioPreviews.get(cacheKey)
+    if (existing) return existing
+    const previewPath = join(
+      app.getPath('temp'),
+      `${randomUUID()}.universal-file-toolkit-audio.mp3`
+    )
+    const preview = this.ffmpegVideoConverter
+      .createAudioPreview(inputPath, previewPath)
+      .then(() => previewPath)
+      .catch(async (error: unknown) => {
+        this.audioPreviews.delete(cacheKey)
+        await rm(previewPath, { force: true }).catch(() => undefined)
+        throw error
+      })
+    this.audioPreviews.set(cacheKey, preview)
+    return preview
   }
 
   trimVideo(
@@ -322,6 +381,117 @@ export class ConversionManager {
       const detail = error instanceof Error ? error.message : ''
       throw new Error(detail || 'Unable to compress this video.')
     }
+  }
+
+  private async performAudioCompression(
+    request: AudioCompressionRequest,
+    onProgress?: (percent: number) => void
+  ): Promise<ConversionResult> {
+    const { inputPath, source, normalizedSource } = await this.prepareMediaInput(request.inputPath)
+    const startedAt = Date.now()
+    const temporaryPath = `${await this.outputManager.createTemporaryPath(inputPath)}.mp3`
+    try {
+      await this.ffmpegVideoConverter.compressAudio(
+        inputPath,
+        temporaryPath,
+        request.bitrateKbps,
+        onProgress
+      )
+      const outputPath = await this.outputManager.publishTemporaryFile(
+        temporaryPath,
+        inputPath,
+        'mp3',
+        '-compressed'
+      )
+      const output = await stat(outputPath)
+      return this.result(
+        inputPath,
+        outputPath,
+        normalizedSource,
+        'mp3',
+        source.size,
+        output.size,
+        startedAt
+      )
+    } catch (error) {
+      await this.outputManager.discardTemporaryFile(temporaryPath)
+      const detail = error instanceof Error ? error.message : ''
+      throw new Error(detail || 'Unable to compress this audio file.')
+    }
+  }
+
+  private async performAudioNormalize(
+    request: AudioNormalizeRequest,
+    onProgress?: (percent: number) => void
+  ): Promise<ConversionResult> {
+    const { inputPath, source, normalizedSource } = await this.prepareMediaInput(request.inputPath)
+    const startedAt = Date.now()
+    const temporaryPath = `${await this.outputManager.createTemporaryPath(inputPath)}.mp3`
+    try {
+      await this.ffmpegVideoConverter.normalizeAudio(inputPath, temporaryPath, request, onProgress)
+      const outputPath = await this.outputManager.publishTemporaryFile(
+        temporaryPath,
+        inputPath,
+        'mp3',
+        '-normalized'
+      )
+      const output = await stat(outputPath)
+      return this.result(
+        inputPath,
+        outputPath,
+        normalizedSource,
+        'mp3',
+        source.size,
+        output.size,
+        startedAt
+      )
+    } catch (error) {
+      await this.outputManager.discardTemporaryFile(temporaryPath)
+      const detail = error instanceof Error ? error.message : ''
+      throw new Error(detail || 'Unable to normalize this audio file.')
+    }
+  }
+
+  private async performAudioTrim(
+    request: AudioTrimRequest,
+    onProgress?: (percent: number) => void
+  ): Promise<ConversionResult> {
+    const { inputPath, source, normalizedSource } = await this.prepareMediaInput(request.inputPath)
+    const startedAt = Date.now()
+    const temporaryPath = `${await this.outputManager.createTemporaryPath(inputPath)}.mp3`
+    try {
+      await this.ffmpegVideoConverter.trimAudio(
+        inputPath,
+        temporaryPath,
+        request.startSeconds,
+        request.endSeconds,
+        onProgress
+      )
+      const outputPath = await this.outputManager.publishTemporaryFile(
+        temporaryPath,
+        inputPath,
+        'mp3',
+        '-trimmed'
+      )
+      const output = await stat(outputPath)
+      return this.result(
+        inputPath,
+        outputPath,
+        normalizedSource,
+        'mp3',
+        source.size,
+        output.size,
+        startedAt
+      )
+    } catch (error) {
+      await this.outputManager.discardTemporaryFile(temporaryPath)
+      throw error
+    }
+  }
+  private async performAudioBleep(request: AudioBleepRequest, onProgress?: (percent: number) => void): Promise<ConversionResult> {
+    const { inputPath, source, normalizedSource } = await this.prepareMediaInput(request.inputPath)
+    const startedAt = Date.now(); const temporaryPath = `${await this.outputManager.createTemporaryPath(inputPath)}.mp3`
+    try { await this.ffmpegVideoConverter.bleepAudio(inputPath, temporaryPath, request.startSeconds, request.endSeconds, onProgress); const outputPath = await this.outputManager.publishTemporaryFile(temporaryPath, inputPath, 'mp3', '-bleeped'); const output = await stat(outputPath); return this.result(inputPath, outputPath, normalizedSource, 'mp3', source.size, output.size, startedAt) } catch (error) { await this.outputManager.discardTemporaryFile(temporaryPath); throw error }
   }
 
   private async performVideoMute(

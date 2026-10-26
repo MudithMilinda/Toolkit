@@ -4,6 +4,11 @@ import AppLayout from './components/AppLayout'
 import DropZone from './components/DropZone'
 import RadialMenu from './components/RadialMenu/RadialMenu'
 import ImageOptionsPanel from './components/ImageOptionsPanel'
+import AudioCompressPanel from './components/AudioCompressPanel'
+import AudioMetadataPanel from './components/AudioMetadataPanel'
+import AudioNormalizePanel from './components/AudioNormalizePanel'
+import AudioTrimPanel from './components/AudioTrimPanel'
+import AudioBleepPanel from './components/AudioBleepPanel'
 import VideoCompressPanel from './components/VideoCompressPanel'
 import VideoMetadataPanel from './components/VideoMetadataPanel'
 import VideoTrimPanel from './components/VideoTrimPanel'
@@ -30,9 +35,15 @@ function App(): React.JSX.Element {
   const [isProcessing, setIsProcessing] = useState(false)
   const [dragModifier, setDragModifier] = useState<'shift' | 'command'>('shift')
   const [draggedFileName, setDraggedFileName] = useState<string | null>(null)
+  const [menuOpenVersion, setMenuOpenVersion] = useState(0)
   const [optionsMode, setOptionsMode] = useState<
     | 'resize'
     | 'compress'
+    | 'audio-compress'
+    | 'audio-metadata'
+    | 'audio-normalize'
+    | 'audio-trim'
+    | 'audio-bleep'
     | 'video-compress'
     | 'video-metadata'
     | 'video-trim'
@@ -53,10 +64,13 @@ function App(): React.JSX.Element {
           optionsMode === 'video-compress' ||
           optionsMode === 'video-trim' ||
           optionsMode === 'video-crop' ||
-          optionsMode === 'video-speed'
+          optionsMode === 'video-speed' ||
+          optionsMode === 'audio-compress' ||
+          optionsMode === 'audio-normalize' ||
+          optionsMode === 'audio-trim'
         ) {
           setPanelStatus(
-            `${optionsMode === 'video-trim' ? 'Trimming' : optionsMode === 'video-crop' ? 'Cropping' : optionsMode === 'video-speed' ? 'Changing speed of' : 'Compressing'} video… ${percent}%`
+            `${optionsMode === 'audio-compress' ? 'Compressing audio' : optionsMode === 'audio-normalize' ? 'Normalizing audio' : optionsMode === 'audio-trim' ? 'Trimming audio' : optionsMode === 'video-trim' ? 'Trimming' : optionsMode === 'video-crop' ? 'Cropping' : optionsMode === 'video-speed' ? 'Changing speed of' : 'Compressing'}${optionsMode === 'audio-compress' || optionsMode === 'audio-normalize' || optionsMode === 'audio-trim' ? '' : ' video'}… ${percent}%`
           )
         }
       }),
@@ -159,6 +173,29 @@ function App(): React.JSX.Element {
           return
         }
         setNotice(`${nextOperation.label} for video is not available yet.`)
+        return
+      }
+      if (nextOperation.id === 'audio-compress') {
+        setPanelStatus(null)
+        setOptionsMode('audio-compress')
+        return
+      }
+      if (nextOperation.id === 'audio-metadata') {
+        setOptionsMode('audio-metadata')
+        return
+      }
+      if (nextOperation.id === 'audio-normalize') {
+        setPanelStatus(null)
+        setOptionsMode('audio-normalize')
+        return
+      }
+      if (nextOperation.id === 'audio-trim') {
+        setPanelStatus(null)
+        setOptionsMode('audio-trim')
+        return
+      }
+      if (nextOperation.id === 'audio-bleep') {
+        setOptionsMode('audio-bleep')
         return
       }
       if (nextOperation.id === 'send-email') {
@@ -400,6 +437,81 @@ function App(): React.JSX.Element {
     },
     [file]
   )
+  const runAudioCompress = useCallback(
+    (payload: { bitrateKbps: 96 | 192 }) => {
+      if (!file) return
+      const inputPath = window.api.getPathForFile(file)
+      if (!inputPath) {
+        setPanelStatus('The audio path could not be read. Please drop the file again.')
+        return
+      }
+      setIsProcessing(true)
+      setConversionProgress(0)
+      setPanelStatus('Compressing audio… 0%')
+      void window.api
+        .compressAudio({ inputPath, operation: 'audio-compress', ...payload })
+        .then(() => {
+          setConversionProgress(100)
+          setPanelStatus('Audio compressed successfully')
+          window.setTimeout(() => void window.api.closeRadialMenu(), 1400)
+        })
+        .catch((error: unknown) => {
+          setConversionProgress(null)
+          setPanelStatus(error instanceof Error ? error.message : 'Audio compression failed.')
+        })
+        .finally(() => setIsProcessing(false))
+    },
+    [file]
+  )
+  const runAudioNormalize = useCallback(
+    (payload: { targetLufs: number; loudnessRange: number; truePeak: number }) => {
+      if (!file) return
+      const inputPath = window.api.getPathForFile(file)
+      if (!inputPath) {
+        setPanelStatus('The audio path could not be read. Please drop the file again.')
+        return
+      }
+      setIsProcessing(true)
+      setConversionProgress(0)
+      setPanelStatus('Normalizing audio… 0%')
+      void window.api
+        .normalizeAudio({ inputPath, operation: 'audio-normalize', ...payload })
+        .then(() => {
+          setConversionProgress(100)
+          setPanelStatus('Audio normalized successfully')
+          window.setTimeout(() => void window.api.closeRadialMenu(), 1400)
+        })
+        .catch((error: unknown) => {
+          setConversionProgress(null)
+          setPanelStatus(error instanceof Error ? error.message : 'Audio normalization failed.')
+        })
+        .finally(() => setIsProcessing(false))
+    },
+    [file]
+  )
+  const runAudioTrim = useCallback(
+    (range: { startSeconds: number; endSeconds: number }) => {
+      if (!file) return
+      const inputPath = window.api.getPathForFile(file)
+      if (!inputPath) return
+      setIsProcessing(true)
+      setConversionProgress(0)
+      setPanelStatus('Trimming audio… 0%')
+      void window.api
+        .trimAudio({ inputPath, operation: 'audio-trim', ...range })
+        .then(() => {
+          setConversionProgress(100)
+          setPanelStatus('Audio trimmed successfully')
+          window.setTimeout(() => void window.api.closeRadialMenu(), 1400)
+        })
+        .catch((error: unknown) => {
+          setConversionProgress(null)
+          setPanelStatus(error instanceof Error ? error.message : 'Audio trimming failed.')
+        })
+        .finally(() => setIsProcessing(false))
+    },
+    [file]
+  )
   const runVideoTrim = useCallback(
     (range: { startSeconds: number; endSeconds: number }) => {
       if (!file) return
@@ -499,7 +611,17 @@ function App(): React.JSX.Element {
     setDragModifier('shift')
     setDraggedFileName(null)
   }, [reset])
-  useEffect(() => window.api.onRadialMenuOpened(resetMenu), [resetMenu])
+  useEffect(
+    () =>
+      window.api.onRadialMenuOpened(() => {
+        resetMenu()
+        setMenuOpenVersion((version) => version + 1)
+      }),
+    [resetMenu]
+  )
+  useEffect(() => {
+    if (menuOpenVersion > 0) window.api.notifyRadialMenuReady()
+  }, [menuOpenVersion])
   useEffect(() => {
     // The floating window is hidden as soon as Finder regains focus. Clear
     // the previous editor while it is hidden so a Q-drag never flashes that
@@ -626,6 +748,46 @@ function App(): React.JSX.Element {
                 onCancel={closeEditor}
                 onResize={(payload) => runEdit('resize', { ...payload, operation: 'resize' })}
                 onCompress={(payload) => runEdit('compress', payload)}
+              />
+            )}
+            {optionsMode === 'audio-compress' && file && !isClosing && (
+              <AudioCompressPanel
+                file={file}
+                statusMessage={panelStatus}
+                onCancel={closeEditor}
+                onCompress={runAudioCompress}
+              />
+            )}
+            {optionsMode === 'audio-metadata' && file && !isClosing && (
+              <AudioMetadataPanel file={file} onCancel={closeEditor} />
+            )}
+            {optionsMode === 'audio-normalize' && file && !isClosing && (
+              <AudioNormalizePanel
+                file={file}
+                statusMessage={panelStatus}
+                onCancel={closeEditor}
+                onApply={runAudioNormalize}
+              />
+            )}
+            {optionsMode === 'audio-trim' && file && !isClosing && (
+              <AudioTrimPanel
+                file={file}
+                statusMessage={panelStatus}
+                onCancel={closeEditor}
+                onApply={runAudioTrim}
+              />
+            )}
+            {optionsMode === 'audio-bleep' && file && !isClosing && (
+              <AudioBleepPanel
+                file={file}
+                onCancel={closeEditor}
+                onSave={(range) => {
+                  const inputPath = window.api.getPathForFile(file)
+                  if (!inputPath) return Promise.reject(new Error('Audio path unavailable.'))
+                  return window.api
+                    .bleepAudio({ inputPath, operation: 'audio-bleep', ...range })
+                    .then(() => setPanelStatus('Bleeped copy created'))
+                }}
               />
             )}
             {optionsMode === 'video-compress' && file && !isClosing && (
