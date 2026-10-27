@@ -99,8 +99,10 @@ const audioToolOperations = entries([
 ])
 const documentToolOperations = entries([
   // Clockwise from the top: this places Compress at 12 o'clock, Metadata on
-  // the right, Split at the bottom and Organize on the left.
+  // the right, Split at the bottom and Organize on the left. ZIP shares the
+  // same local archive workflow as image, video and audio files.
   ['pdf-compress', 'Compress'],
+  ['zip', 'ZIP'],
   ['pdf-metadata', 'Metadata'],
   ['pdf-split', 'Split'],
   ['pdf-organize', 'Organize']
