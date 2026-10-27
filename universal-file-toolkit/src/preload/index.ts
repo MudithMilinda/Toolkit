@@ -43,6 +43,30 @@ const api = Object.freeze({
     }>,
   getPdfMetadata: (inputPath: string) =>
     ipcRenderer.invoke('pdf:metadata', inputPath) as Promise<Array<{ key: string; value: string }>>,
+  getPdfThumbnails: (inputPath: string) =>
+    ipcRenderer.invoke('pdf:thumbnails', inputPath) as Promise<{
+      pageCount: number
+      thumbnails: string[]
+    }>,
+  splitPdf: (payload: {
+    inputPath: string
+    operation: 'pdf-split'
+    startPage: number
+    endPage: number
+    splitEveryPage: boolean
+  }) => ipcRenderer.invoke('conversion:pdf-split', payload) as Promise<{ outputPaths: string[] }>,
+  organizePdf: (payload: {
+    inputPath: string
+    operation: 'pdf-organize'
+    pageOrder: number[]
+    pageRotations: Record<number, number>
+  }) =>
+    ipcRenderer.invoke('conversion:pdf-organize', payload) as Promise<{
+      outputPath: string
+      originalSize: number
+      outputSize: number
+      savedPercent: number
+    }>,
   convertVideo: (payload: {
     inputPath: string
     targetFormat:

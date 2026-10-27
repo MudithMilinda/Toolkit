@@ -34,6 +34,8 @@ import type {
   ImageConversionRequest,
   PdfConversionRequest,
   PdfCompressionRequest,
+  PdfSplitRequest,
+  PdfOrganizeRequest,
   ImagesToPdfRequest,
   ImageResizeRequest,
   VideoConversionRequest
@@ -116,6 +118,37 @@ function isPdfCompressionRequest(value: unknown): value is PdfCompressionRequest
   if (!value || typeof value !== 'object') return false
   const candidate = value as Record<string, unknown>
   return hasSafeInputPath(candidate) && candidate.operation === 'pdf-compress'
+}
+function isPdfSplitRequest(value: unknown): value is PdfSplitRequest {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return (
+    hasSafeInputPath(candidate) &&
+    candidate.operation === 'pdf-split' &&
+    Number.isInteger(candidate.startPage) &&
+    Number.isInteger(candidate.endPage) &&
+    typeof candidate.splitEveryPage === 'boolean'
+  )
+}
+function isPdfOrganizeRequest(value: unknown): value is PdfOrganizeRequest {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return (
+    hasSafeInputPath(candidate) &&
+    candidate.operation === 'pdf-organize' &&
+    Array.isArray(candidate.pageOrder) &&
+    candidate.pageOrder.length > 0 &&
+    candidate.pageOrder.length <= 10_000 &&
+    candidate.pageOrder.every((page) => Number.isInteger(page) && page > 0 && page <= 10_000) &&
+    Boolean(candidate.pageRotations) &&
+    typeof candidate.pageRotations === 'object' &&
+    Object.entries(candidate.pageRotations as Record<string, unknown>).every(
+      ([page, rotation]) =>
+        Number.isInteger(Number(page)) &&
+        Number(page) > 0 &&
+        [0, 90, 180, 270].includes(rotation as number)
+    )
+  )
 }
 function isVideoConversionRequest(value: unknown): value is VideoConversionRequest {
   if (!value || typeof value !== 'object') return false
@@ -612,6 +645,19 @@ app.whenReady().then(() => {
     if (typeof inputPath !== 'string' || !isAbsolute(inputPath) || inputPath.includes('\0'))
       throw new Error('Invalid PDF path.')
     return conversionManager.getPdfMetadata(inputPath)
+  })
+  ipcMain.handle('pdf:thumbnails', async (_, inputPath: unknown) => {
+    if (typeof inputPath !== 'string' || !isAbsolute(inputPath) || inputPath.includes('\0'))
+      throw new Error('Invalid PDF path.')
+    return conversionManager.getPdfThumbnails(inputPath)
+  })
+  ipcMain.handle('conversion:pdf-split', async (_, payload: unknown) => {
+    if (!isPdfSplitRequest(payload)) throw new Error('Invalid PDF split request.')
+    return conversionManager.splitPdf(payload)
+  })
+  ipcMain.handle('conversion:pdf-organize', async (_, payload: unknown) => {
+    if (!isPdfOrganizeRequest(payload)) throw new Error('Invalid PDF organize request.')
+    return conversionManager.organizePdf(payload)
   })
   ipcMain.handle('conversion:video', async (event, payload: unknown) => {
     if (!isVideoConversionRequest(payload)) throw new Error('Invalid video conversion request.')

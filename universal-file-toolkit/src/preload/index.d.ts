@@ -33,6 +33,28 @@ declare global {
         savedPercent: number
       }>
       getPdfMetadata: (inputPath: string) => Promise<Array<{ key: string; value: string }>>
+      getPdfThumbnails: (inputPath: string) => Promise<{
+        pageCount: number
+        thumbnails: string[]
+      }>
+      splitPdf: (payload: {
+        inputPath: string
+        operation: 'pdf-split'
+        startPage: number
+        endPage: number
+        splitEveryPage: boolean
+      }) => Promise<{ outputPaths: string[] }>
+      organizePdf: (payload: {
+        inputPath: string
+        operation: 'pdf-organize'
+        pageOrder: number[]
+        pageRotations: Record<number, number>
+      }) => Promise<{
+        outputPath: string
+        originalSize: number
+        outputSize: number
+        savedPercent: number
+      }>
       convertVideo: (payload: {
         inputPath: string
         targetFormat:

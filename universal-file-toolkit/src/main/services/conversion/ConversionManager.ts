@@ -27,6 +27,8 @@ import type {
   ImageTargetFormat,
   PdfConversionRequest,
   PdfCompressionRequest,
+  PdfSplitRequest,
+  PdfOrganizeRequest,
   VideoCompressionRequest,
   VideoCropRequest,
   VideoSpeedRequest,
@@ -122,6 +124,74 @@ function run(argv) {
 }
 `
 
+const pdfThumbnailScript = String.raw`
+ObjC.import('Foundation')
+ObjC.import('PDFKit')
+ObjC.import('AppKit')
+function run(argv) {
+  const document = $.PDFDocument.alloc.initWithURL($.NSURL.fileURLWithPath($(argv[0])))
+  if (!document) throw new Error('The PDF could not be opened.')
+  const directory = argv[1]
+  const limit = Math.min(Number(document.pageCount), Number(argv[2]))
+  const names = []
+  for (let index = 0; index < limit; index += 1) {
+    const image = document.pageAtIndex(index).thumbnailOfSizeForBox($.NSMakeSize(140, 180), $.kPDFDisplayBoxCropBox)
+    const bitmap = $.NSBitmapImageRep.imageRepWithData(image.TIFFRepresentation)
+    const data = bitmap.representationUsingTypeProperties($.NSBitmapImageFileTypePNG, $({}))
+    const name = 'page-' + (index + 1) + '.png'
+    if (!data.writeToURLAtomically($.NSURL.fileURLWithPath($(directory + '/' + name)), true))
+      throw new Error('A PDF preview could not be created.')
+    names.push(name)
+  }
+  return JSON.stringify({ pageCount: Number(document.pageCount), names: names })
+}
+`
+
+const pdfSplitScript = String.raw`
+ObjC.import('Foundation')
+ObjC.import('PDFKit')
+function run(argv) {
+  const input = $.PDFDocument.alloc.initWithURL($.NSURL.fileURLWithPath($(argv[0])))
+  if (!input) throw new Error('The PDF could not be opened.')
+  const start = Number(argv[1]) - 1
+  const end = Number(argv[2]) - 1
+  if (start < 0 || end < start || end >= Number(input.pageCount))
+    throw new Error('Choose a valid page range.')
+  const output = $.PDFDocument.alloc.init
+  for (let index = start; index <= end; index += 1) output.insertPageAtIndex(input.pageAtIndex(index), Number(output.pageCount))
+  if (!output.writeToURL($.NSURL.fileURLWithPath($(argv[3]))))
+    throw new Error('The split PDF could not be saved.')
+}
+`
+
+const pdfOrganizeScript = String.raw`
+ObjC.import('Foundation')
+ObjC.import('PDFKit')
+function run(argv) {
+  const input = $.PDFDocument.alloc.initWithURL($.NSURL.fileURLWithPath($(argv[0])))
+  if (!input) throw new Error('The PDF could not be opened.')
+  const pageOrder = JSON.parse(argv[1])
+  const pageRotations = JSON.parse(argv[2])
+  if (!Array.isArray(pageOrder) || !pageOrder.length) throw new Error('Keep at least one page.')
+  const seen = {}
+  for (const pageNumber of pageOrder) {
+    if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > Number(input.pageCount) || seen[pageNumber])
+      throw new Error('The PDF page order is invalid.')
+    seen[pageNumber] = true
+  }
+  const output = $.PDFDocument.alloc.init
+  for (const pageNumber of pageOrder) {
+    const rotation = Number(pageRotations[String(pageNumber)] || 0)
+    if (![0, 90, 180, 270].includes(rotation)) throw new Error('The PDF page rotation is invalid.')
+    const page = input.pageAtIndex(pageNumber - 1)
+    if (rotation) page.rotation = (Number(page.rotation) + rotation) % 360
+    output.insertPageAtIndex(page, Number(output.pageCount))
+  }
+  if (!output.writeToURL($.NSURL.fileURLWithPath($(argv[3]))))
+    throw new Error('The organized PDF could not be saved.')
+}
+`
+
 /** Main-process-only image conversion coordinator. Duplicate jobs share one promise. */
 export class ConversionManager {
   private readonly imageConverter = new ImageConverter()
@@ -151,6 +221,99 @@ export class ConversionManager {
     return this.startJob(`${resolve(request.inputPath)}:pdf-compress`, () =>
       this.performPdfCompression(request)
     )
+  }
+
+  async splitPdf(request: PdfSplitRequest): Promise<{ outputPaths: string[] }> {
+    if (process.platform !== 'darwin') throw new Error('PDF splitting is currently available on macOS.')
+    if (!isAbsolute(request.inputPath)) throw new Error('The input file path must be absolute.')
+    if (!Number.isInteger(request.startPage) || !Number.isInteger(request.endPage))
+      throw new Error('Choose whole page numbers.')
+    if (request.startPage < 1 || request.endPage < request.startPage || request.endPage > 10_000)
+      throw new Error('Choose a valid page range.')
+    const inputPath = resolve(request.inputPath)
+    const source = await stat(inputPath)
+    if (!source.isFile() || inputPath.split('.').pop()?.toLowerCase() !== 'pdf')
+      throw new Error('Select a valid PDF file.')
+    const ranges = request.splitEveryPage
+      ? Array.from({ length: request.endPage - request.startPage + 1 }, (_, index) => {
+          const page = request.startPage + index
+          return [page, page] as const
+        })
+      : [[request.startPage, request.endPage] as const]
+    const outputPaths: string[] = []
+    for (const [startPage, endPage] of ranges) {
+      const temporaryPath = `${await this.outputManager.createTemporaryPath(inputPath)}.pdf`
+      try {
+        await execFileAsync('/usr/bin/osascript', [
+          '-l',
+          'JavaScript',
+          '-e',
+          pdfSplitScript,
+          inputPath,
+          String(startPage),
+          String(endPage),
+          temporaryPath
+        ])
+        outputPaths.push(
+          await this.outputManager.publishTemporaryFile(
+            temporaryPath,
+            inputPath,
+            'pdf',
+            startPage === endPage ? `-page-${startPage}` : `-pages-${startPage}-${endPage}`
+          )
+        )
+      } finally {
+        await this.outputManager.discardTemporaryFile(temporaryPath)
+      }
+    }
+    return { outputPaths }
+  }
+
+  async organizePdf(request: PdfOrganizeRequest): Promise<ConversionResult> {
+    if (process.platform !== 'darwin') throw new Error('PDF organization is currently available on macOS.')
+    if (!isAbsolute(request.inputPath)) throw new Error('The input file path must be absolute.')
+    if (!Array.isArray(request.pageOrder) || !request.pageOrder.length || request.pageOrder.length > 10_000)
+      throw new Error('Keep between 1 and 10,000 PDF pages.')
+    if (
+      !request.pageRotations ||
+      typeof request.pageRotations !== 'object' ||
+      !Object.entries(request.pageRotations).every(
+        ([page, rotation]) =>
+          Number.isInteger(Number(page)) && [0, 90, 180, 270].includes(rotation)
+      )
+    )
+      throw new Error('The PDF page rotations are invalid.')
+    const inputPath = resolve(request.inputPath)
+    const source = await stat(inputPath)
+    if (!source.isFile() || inputPath.split('.').pop()?.toLowerCase() !== 'pdf')
+      throw new Error('Select a valid PDF file.')
+    const startedAt = Date.now()
+    const temporaryPath = `${await this.outputManager.createTemporaryPath(inputPath)}.pdf`
+    try {
+      await execFileAsync('/usr/bin/osascript', [
+        '-l',
+        'JavaScript',
+        '-e',
+        pdfOrganizeScript,
+        inputPath,
+        JSON.stringify(request.pageOrder),
+        JSON.stringify(request.pageRotations),
+        temporaryPath
+      ])
+      const outputPath = await this.outputManager.publishTemporaryFile(
+        temporaryPath,
+        inputPath,
+        'pdf',
+        '-organized'
+      )
+      const output = await stat(outputPath)
+      return this.result(inputPath, outputPath, 'pdf', 'pdf', source.size, output.size, startedAt)
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : ''
+      throw new Error(detail || 'Unable to organize this PDF.', { cause: error })
+    } finally {
+      await this.outputManager.discardTemporaryFile(temporaryPath)
+    }
   }
 
   async getPdfMetadata(inputPathValue: string): Promise<Array<{ key: string; value: string }>> {
@@ -187,6 +350,44 @@ export class ConversionManager {
       return items
     } catch (error) {
       throw new Error('Unable to read metadata from this PDF.', { cause: error })
+    }
+  }
+
+  async getPdfThumbnails(
+    inputPathValue: string
+  ): Promise<{ pageCount: number; thumbnails: string[] }> {
+    if (!isAbsolute(inputPathValue)) throw new Error('The PDF path must be absolute.')
+    const inputPath = resolve(inputPathValue)
+    const source = await stat(inputPath)
+    if (!source.isFile() || inputPath.split('.').pop()?.toLowerCase() !== 'pdf')
+      throw new Error('Select a valid PDF file.')
+    const directory = join(app.getPath('temp'), `universal-file-toolkit-pdf-${randomUUID()}`)
+    await mkdir(directory, { recursive: true })
+    try {
+      const { stdout } = await execFileAsync(
+        '/usr/bin/osascript',
+        ['-l', 'JavaScript', '-e', pdfThumbnailScript, inputPath, directory, '120'],
+        { maxBuffer: 4 * 1024 * 1024 }
+      )
+      const result = JSON.parse(stdout) as { pageCount?: unknown; names?: unknown }
+      if (
+        !Number.isInteger(result.pageCount) ||
+        (result.pageCount as number) < 1 ||
+        !Array.isArray(result.names) ||
+        !result.names.every((name) => typeof name === 'string' && /^page-\d+\.png$/.test(name))
+      )
+        throw new Error('Invalid PDF preview response.')
+      const thumbnails = await Promise.all(
+        result.names.map(async (name) => {
+          const bytes = await readFile(join(directory, name))
+          return `data:image/png;base64,${bytes.toString('base64')}`
+        })
+      )
+      return { pageCount: result.pageCount as number, thumbnails }
+    } catch (error) {
+      throw new Error('Unable to create PDF page previews.', { cause: error })
+    } finally {
+      await rm(directory, { recursive: true, force: true }).catch(() => undefined)
     }
   }
 

@@ -11,6 +11,8 @@ import AudioTrimPanel from './components/AudioTrimPanel'
 import AudioBleepPanel from './components/AudioBleepPanel'
 import PdfCompressPanel from './components/PdfCompressPanel'
 import PdfMetadataPanel from './components/PdfMetadataPanel'
+import PdfSplitPanel from './components/PdfSplitPanel'
+import PdfOrganizePanel from './components/PdfOrganizePanel'
 import VideoCompressPanel from './components/VideoCompressPanel'
 import VideoMetadataPanel from './components/VideoMetadataPanel'
 import VideoTrimPanel from './components/VideoTrimPanel'
@@ -48,6 +50,8 @@ function App(): React.JSX.Element {
     | 'audio-bleep'
     | 'pdf-compress'
     | 'pdf-metadata'
+    | 'pdf-split'
+    | 'pdf-organize'
     | 'video-compress'
     | 'video-metadata'
     | 'video-trim'
@@ -209,6 +213,16 @@ function App(): React.JSX.Element {
       }
       if (nextOperation.id === 'pdf-metadata') {
         setOptionsMode('pdf-metadata')
+        return
+      }
+      if (nextOperation.id === 'pdf-split') {
+        setPanelStatus(null)
+        setOptionsMode('pdf-split')
+        return
+      }
+      if (nextOperation.id === 'pdf-organize') {
+        setPanelStatus(null)
+        setOptionsMode('pdf-organize')
         return
       }
       if (nextOperation.id === 'send-email') {
@@ -877,6 +891,62 @@ function App(): React.JSX.Element {
             )}
             {optionsMode === 'pdf-metadata' && file && !isClosing && (
               <PdfMetadataPanel file={file} onCancel={closeEditor} />
+            )}
+            {optionsMode === 'pdf-split' && file && !isClosing && (
+              <PdfSplitPanel
+                file={file}
+                isProcessing={isProcessing}
+                statusMessage={panelStatus}
+                onCancel={closeEditor}
+                onSplit={(payload) => {
+                  const inputPath = window.api.getPathForFile(file)
+                  if (!inputPath) {
+                    setPanelStatus('The PDF path could not be read.')
+                    return
+                  }
+                  setIsProcessing(true)
+                  setPanelStatus('Splitting PDF…')
+                  void window.api
+                    .splitPdf({ inputPath, operation: 'pdf-split', ...payload })
+                    .then(({ outputPaths }) =>
+                      setPanelStatus(
+                        outputPaths.length === 1
+                          ? `Saved — ${outputPaths[0]?.split(/[\\/]/).pop()}`
+                          : `Saved ${outputPaths.length} PDF files`
+                      )
+                    )
+                    .catch((error: unknown) =>
+                      setPanelStatus(error instanceof Error ? error.message : 'PDF split failed.')
+                    )
+                    .finally(() => setIsProcessing(false))
+                }}
+              />
+            )}
+            {optionsMode === 'pdf-organize' && file && !isClosing && (
+              <PdfOrganizePanel
+                file={file}
+                isProcessing={isProcessing}
+                statusMessage={panelStatus}
+                onCancel={closeEditor}
+                onSave={({ pageOrder, pageRotations }) => {
+                  const inputPath = window.api.getPathForFile(file)
+                  if (!inputPath) {
+                    setPanelStatus('The PDF path could not be read.')
+                    return
+                  }
+                  setIsProcessing(true)
+                  setPanelStatus('Saving PDF order…')
+                  void window.api
+                    .organizePdf({ inputPath, operation: 'pdf-organize', pageOrder, pageRotations })
+                    .then((result) =>
+                      setPanelStatus(`Saved — ${result.outputPath.split(/[\\/]/).pop()}`)
+                    )
+                    .catch((error: unknown) =>
+                      setPanelStatus(error instanceof Error ? error.message : 'PDF organization failed.')
+                    )
+                    .finally(() => setIsProcessing(false))
+                }}
+              />
             )}
             {optionsMode === 'video-compress' && file && !isClosing && (
               <VideoCompressPanel

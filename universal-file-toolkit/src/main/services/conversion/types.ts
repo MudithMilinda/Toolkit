@@ -28,6 +28,19 @@ export interface PdfCompressionRequest {
   inputPath: string
   operation: 'pdf-compress'
 }
+export interface PdfSplitRequest {
+  inputPath: string
+  operation: 'pdf-split'
+  startPage: number
+  endPage: number
+  splitEveryPage: boolean
+}
+export interface PdfOrganizeRequest {
+  inputPath: string
+  operation: 'pdf-organize'
+  pageOrder: number[]
+  pageRotations: Record<number, number>
+}
 export interface VideoConversionRequest {
   inputPath: string
   targetFormat: VideoTargetFormat
