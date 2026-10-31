@@ -34,6 +34,16 @@ const api = Object.freeze({
       outputSize: number
       savedPercent: number
     }>,
+  convertDocument: (payload: {
+    inputPath: string
+    targetFormat: 'pdf' | 'pages' | 'epub' | 'txt' | 'md' | 'html' | 'jpg' | 'png'
+  }) =>
+    ipcRenderer.invoke('conversion:document', payload) as Promise<{
+      outputPath: string
+      originalSize: number
+      outputSize: number
+      savedPercent: number
+    }>,
   compressPdf: (payload: { inputPath: string; operation: 'pdf-compress' }) =>
     ipcRenderer.invoke('conversion:pdf-compress', payload) as Promise<{
       outputPath: string
@@ -137,7 +147,12 @@ const api = Object.freeze({
       outputSize: number
       savedPercent: number
     }>,
-  bleepAudio: (payload: { inputPath: string; operation: 'audio-bleep'; startSeconds: number; endSeconds: number }) => ipcRenderer.invoke('conversion:audio-bleep', payload) as Promise<{ outputPath: string }>,
+  bleepAudio: (payload: {
+    inputPath: string
+    operation: 'audio-bleep'
+    startSeconds: number
+    endSeconds: number
+  }) => ipcRenderer.invoke('conversion:audio-bleep', payload) as Promise<{ outputPath: string }>,
   getVideoMetadata: (inputPath: string) =>
     ipcRenderer.invoke('video:metadata', inputPath) as Promise<
       Array<{ key: string; value: string }>

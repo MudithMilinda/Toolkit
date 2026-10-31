@@ -26,6 +26,15 @@ declare global {
         outputSize: number
         savedPercent: number
       }>
+      convertDocument: (payload: {
+        inputPath: string
+        targetFormat: 'pdf' | 'pages' | 'epub' | 'txt' | 'md' | 'html' | 'jpg' | 'png'
+      }) => Promise<{
+        outputPath: string
+        originalSize: number
+        outputSize: number
+        savedPercent: number
+      }>
       compressPdf: (payload: { inputPath: string; operation: 'pdf-compress' }) => Promise<{
         outputPath: string
         originalSize: number
@@ -120,7 +129,12 @@ declare global {
         outputSize: number
         savedPercent: number
       }>
-      bleepAudio: (payload: { inputPath: string; operation: 'audio-bleep'; startSeconds: number; endSeconds: number }) => Promise<{ outputPath: string }>
+      bleepAudio: (payload: {
+        inputPath: string
+        operation: 'audio-bleep'
+        startSeconds: number
+        endSeconds: number
+      }) => Promise<{ outputPath: string }>
       getVideoMetadata: (inputPath: string) => Promise<Array<{ key: string; value: string }>>
       getVideoSourceUrl: (inputPath: string) => Promise<string>
       getVideoPoster: (inputPath: string) => Promise<string>

@@ -134,9 +134,9 @@ export default function RadialSegment({
               ? Crop
               : operation.id === 'trim' || operation.id === 'video-trim'
                 ? Scissors
-              : operation.id === 'metadata' ||
-                  operation.id === 'video-metadata' ||
-                  operation.id === 'pdf-metadata'
+                : operation.id === 'metadata' ||
+                    operation.id === 'video-metadata' ||
+                    operation.id === 'pdf-metadata'
                   ? Info
                   : operation.id === 'video-mute'
                     ? VolumeX
@@ -148,18 +148,18 @@ export default function RadialSegment({
                           ? PanelTop
                           : operation.id === 'pdf-organize'
                             ? LayoutGrid
-                          : operation.id === 'video-redact'
-                            ? CaptionsOff
-                            : operation.id === 'audio' ||
-                                operation.id === 'mp3' ||
-                                operation.id === 'wav' ||
-                                operation.id === 'aac'
-                              ? Music2
-                              : operation.id === 'png' ||
-                                  operation.id === 'jpg' ||
-                                  operation.id === 'webp'
-                                ? Image
-                                : FileOutput
+                            : operation.id === 'video-redact'
+                              ? CaptionsOff
+                              : operation.id === 'audio' ||
+                                  operation.id === 'mp3' ||
+                                  operation.id === 'wav' ||
+                                  operation.id === 'aac'
+                                ? Music2
+                                : operation.id === 'png' ||
+                                    operation.id === 'jpg' ||
+                                    operation.id === 'webp'
+                                  ? Image
+                                  : FileOutput
   return (
     <motion.g
       className="radial-segment-group"

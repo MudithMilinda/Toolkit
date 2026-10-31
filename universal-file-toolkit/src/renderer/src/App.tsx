@@ -24,6 +24,7 @@ import ImageMetadataPanel from './components/ImageMetadataPanel'
 import { useFileDrop } from './hooks/useFileDrop'
 import {
   getFileCategory,
+  getFileExtension,
   getFileToolOperations,
   getOperationsForFile,
   type FileOperation
@@ -250,7 +251,7 @@ function App(): React.JSX.Element {
           nextOperation.id === 'md' ||
           nextOperation.id === 'jpg' ||
           nextOperation.id === 'png') &&
-        getFileCategory(selectedFile.name) === 'document'
+        getFileExtension(selectedFile.name) === 'pdf'
       ) {
         const inputPath = window.api.getPathForFile(selectedFile)
         if (!inputPath) {
@@ -272,6 +273,42 @@ function App(): React.JSX.Element {
               error instanceof Error
                 ? error.message
                 : `PDF to ${nextOperation.label} conversion failed.`
+            )
+          })
+          .finally(() => setIsProcessing(false))
+        return
+      }
+      if (
+        ['pdf', 'pages', 'epub', 'txt', 'md', 'html', 'jpg', 'png'].includes(nextOperation.id) &&
+        ['doc', 'docx', 'ppt', 'pptx'].includes(
+          selectedFile.name.split('.').pop()?.toLowerCase() ?? ''
+        )
+      ) {
+        const inputPath = window.api.getPathForFile(selectedFile)
+        if (!inputPath) {
+          setNotice('The selected document path could not be read. Please drop the file again.')
+          return
+        }
+        setIsProcessing(true)
+        setIsClosing(true)
+        setNotice(`Converting ${selectedFile.name} to ${nextOperation.label}…`)
+        window.setTimeout(() => void window.api.closeRadialMenu(), 220)
+        void window.api
+          .convertDocument({
+            inputPath,
+            targetFormat: nextOperation.id as Parameters<
+              typeof window.api.convertDocument
+            >[0]['targetFormat']
+          })
+          .then((result) =>
+            setNotice(`${nextOperation.label} created — ${result.outputPath.split(/[\\/]/).pop()}.`)
+          )
+          .catch((error: unknown) => {
+            setIsClosing(false)
+            setNotice(
+              error instanceof Error
+                ? error.message
+                : `Document to ${nextOperation.label} conversion failed.`
             )
           })
           .finally(() => setIsProcessing(false))
@@ -767,7 +804,13 @@ function App(): React.JSX.Element {
                       setNotice('That action is not available for this file type.')
                       return
                     }
-                    if (nextOperation.id === 'pdf' && droppedFiles.length > 1) {
+                    if (
+                      nextOperation.id === 'pdf' &&
+                      droppedFiles.length > 1 &&
+                      droppedFiles.every(
+                        (fileToConvert) => getFileCategory(fileToConvert.name) === 'image'
+                      )
+                    ) {
                       const inputPaths = droppedFiles
                         .map((droppedFile) => window.api.getPathForFile(droppedFile))
                         .filter((inputPath): inputPath is string => Boolean(inputPath))
@@ -878,12 +921,12 @@ function App(): React.JSX.Element {
                     .then((result) => {
                       const sizeNote =
                         result.savedPercent > 0 ? ` · ${result.savedPercent}% smaller` : ''
-                      setPanelStatus(
-                        `Saved — ${result.outputPath.split(/[\\/]/).pop()}${sizeNote}`
-                      )
+                      setPanelStatus(`Saved — ${result.outputPath.split(/[\\/]/).pop()}${sizeNote}`)
                     })
                     .catch((error: unknown) =>
-                      setPanelStatus(error instanceof Error ? error.message : 'PDF compression failed.')
+                      setPanelStatus(
+                        error instanceof Error ? error.message : 'PDF compression failed.'
+                      )
                     )
                     .finally(() => setIsProcessing(false))
                 }}
@@ -942,7 +985,9 @@ function App(): React.JSX.Element {
                       setPanelStatus(`Saved — ${result.outputPath.split(/[\\/]/).pop()}`)
                     )
                     .catch((error: unknown) =>
-                      setPanelStatus(error instanceof Error ? error.message : 'PDF organization failed.')
+                      setPanelStatus(
+                        error instanceof Error ? error.message : 'PDF organization failed.'
+                      )
                     )
                     .finally(() => setIsProcessing(false))
                 }}

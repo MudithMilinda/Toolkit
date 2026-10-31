@@ -32,6 +32,7 @@ import type {
   ImageCropRequest,
   ImageEditRequest,
   ImageConversionRequest,
+  DocumentConversionRequest,
   PdfConversionRequest,
   PdfCompressionRequest,
   PdfSplitRequest,
@@ -43,6 +44,7 @@ import type {
 
 let radialWindow: BrowserWindow | null = null
 let tray: Tray | null = null
+let nativeDragFileName: string | null = null
 const nativeIntegration = createNativeIntegration()
 const conversionManager = new ConversionManager()
 const execFileAsync = promisify(execFile)
@@ -112,6 +114,16 @@ function isPdfConversionRequest(value: unknown): value is PdfConversionRequest {
       candidate.targetFormat === 'md' ||
       candidate.targetFormat === 'jpg' ||
       candidate.targetFormat === 'png')
+  )
+}
+function isDocumentConversionRequest(value: unknown): value is DocumentConversionRequest {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Record<string, unknown>
+  return (
+    hasSafeInputPath(candidate) &&
+    ['pdf', 'pages', 'epub', 'txt', 'md', 'html', 'jpg', 'png'].includes(
+      String(candidate.targetFormat)
+    )
   )
 }
 function isPdfCompressionRequest(value: unknown): value is PdfCompressionRequest {
@@ -232,7 +244,10 @@ function isAudioTrimRequest(value: unknown): value is AudioTrimRequest {
 function isAudioBleepRequest(value: unknown): value is AudioBleepRequest {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Record<string, unknown>
-  return candidate.operation === 'audio-bleep' && isAudioTrimRequest({ ...candidate, operation: 'audio-trim' })
+  return (
+    candidate.operation === 'audio-bleep' &&
+    isAudioTrimRequest({ ...candidate, operation: 'audio-trim' })
+  )
 }
 function isVideoTrimRequest(value: unknown): value is {
   inputPath: string
@@ -447,6 +462,12 @@ function showRadialMenu(focus = true): void {
 function showNativeDragCandidate(modifier: 'shift' | 'command', fileName?: string): void {
   if (nativeDismissTimer) clearTimeout(nativeDismissTimer)
   nativeDragCandidateVisible = true
+  nativeDragFileName = fileName ?? null
+  const extension = fileName?.split('.').pop()?.toLowerCase()
+  if (modifier === 'command' && ['doc', 'docx', 'ppt', 'pptx'].includes(extension ?? '')) {
+    radialWindow?.hide()
+    return
+  }
   // Experimental: a newly shown window may not join a Finder drag already in progress.
   showRadialMenu(false)
   radialWindow?.webContents.send('radial-menu:modifier', modifier)
@@ -569,8 +590,14 @@ app.whenReady().then(() => {
   createTray()
   nativeIntegration.start({
     onModifierDragCandidate: showNativeDragCandidate,
-    onModifierChanged: (modifier) =>
-      radialWindow?.webContents.send('radial-menu:modifier', modifier),
+    onModifierChanged: (modifier) => {
+      const extension = nativeDragFileName?.split('.').pop()?.toLowerCase()
+      if (modifier === 'command' && ['doc', 'docx', 'ppt', 'pptx'].includes(extension ?? '')) {
+        radialWindow?.hide()
+        return
+      }
+      radialWindow?.webContents.send('radial-menu:modifier', modifier)
+    },
     onOutsideClick: ({ x, y }) => {
       if (!radialWindow?.isVisible()) return
       const bounds = radialWindow.getBounds()
@@ -637,6 +664,11 @@ app.whenReady().then(() => {
     if (!isPdfConversionRequest(payload)) throw new Error('Invalid PDF conversion request.')
     return conversionManager.convertPdf(payload)
   })
+  ipcMain.handle('conversion:document', async (_, payload: unknown) => {
+    if (!isDocumentConversionRequest(payload))
+      throw new Error('Invalid document conversion request.')
+    return conversionManager.convertDocument(payload)
+  })
   ipcMain.handle('conversion:pdf-compress', async (_, payload: unknown) => {
     if (!isPdfCompressionRequest(payload)) throw new Error('Invalid PDF compression request.')
     return conversionManager.compressPdf(payload)
@@ -689,7 +721,12 @@ app.whenReady().then(() => {
       event.sender.send('conversion:video-progress', percent)
     )
   })
-  ipcMain.handle('conversion:audio-bleep', async (event, payload: unknown) => { if (!isAudioBleepRequest(payload)) throw new Error('Invalid audio bleep request.'); return conversionManager.bleepAudio(payload, (percent) => event.sender.send('conversion:video-progress', percent)) })
+  ipcMain.handle('conversion:audio-bleep', async (event, payload: unknown) => {
+    if (!isAudioBleepRequest(payload)) throw new Error('Invalid audio bleep request.')
+    return conversionManager.bleepAudio(payload, (percent) =>
+      event.sender.send('conversion:video-progress', percent)
+    )
+  })
   ipcMain.handle('conversion:video-mute', async (event, inputPath: unknown) => {
     if (typeof inputPath !== 'string' || !isAbsolute(inputPath) || inputPath.includes('\0'))
       throw new Error('Invalid video path.')

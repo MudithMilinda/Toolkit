@@ -67,9 +67,14 @@ export default function RadialMenu({
     },
     [onSelect, operations]
   )
-  const keyboardIndex = useKeyboardNavigation(operations.length, selectIndex, onDismiss)
   const previewFileName = file?.name ?? draggedFileName ?? null
   const category = previewFileName ? getFileCategory(previewFileName) : 'image'
+  const qModeOnOfficeDocument =
+    modifier === 'command' &&
+    category === 'document' &&
+    previewFileName !== null &&
+    getFileExtension(previewFileName) !== 'pdf'
+  const keyboardIndex = useKeyboardNavigation(operations.length, selectIndex, onDismiss)
   const hoveredOperation = hovered !== null ? operations[hovered] : null
   const centerLabel =
     processingProgress !== null
@@ -106,6 +111,10 @@ export default function RadialMenu({
       </div>
     )
   }
+
+  // DOC and DOCX files intentionally have no Q-only tools. Leave the overlay
+  // empty instead of falling back to the conversion wheel or PDF-only tools.
+  if (qModeOnOfficeDocument) return <div aria-hidden="true" />
 
   return (
     <div className="radial-menu" aria-label="File operation menu">

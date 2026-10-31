@@ -17,17 +17,15 @@ const operationMap: Record<FileCategory, FileOperation[]> = {
     ['jpg', 'JPG']
   ]),
   document: entries([
-    // Keep this order clockwise from the top of the wheel. It mirrors the
-    // document-conversion layout and leaves PDF in the centre lens.
-    ['docx', 'DOCX'],
+    // Clockwise from 12 o'clock, matching the document conversion wheel.
     ['pages', 'PAGES'],
-    ['pptx', 'PPTX'],
-    ['xlsx', 'XLSX'],
-    ['jpg', 'JPG'],
-    ['png', 'PNG'],
-    ['epub', 'EPUB'],
+    ['pdf', 'PDF'],
     ['txt', 'TXT'],
-    ['md', 'MD']
+    ['md', 'MD'],
+    ['html', 'HTML'],
+    ['epub', 'EPUB'],
+    ['png', 'PNG'],
+    ['jpg', 'JPG']
   ]),
   video: entries([
     ['mp4', 'MP4'],
@@ -48,6 +46,12 @@ const operationMap: Record<FileCategory, FileOperation[]> = {
   ]),
   unknown: []
 }
+
+const presentationOperations = entries([
+  ['pdf', 'PDF'],
+  ['png', 'PNG'],
+  ['jpg', 'JPG']
+])
 export function getFileExtension(filename: string): string {
   const part = filename.split('.').pop()
   return part && part !== filename ? part.toLowerCase() : ''
@@ -57,13 +61,15 @@ export function getFileCategory(filename: string): FileCategory {
   if (['png', 'jpg', 'jpeg', 'webp', 'avif', 'tif', 'tiff', 'gif', 'heic', 'heif'].includes(ext)) {
     return 'image'
   }
-  if (ext === 'pdf') return 'document'
+  if (['pdf', 'doc', 'docx', 'ppt', 'pptx'].includes(ext)) return 'document'
   if (['mp4', 'mov', 'webm', 'mkv', 'avi'].includes(ext)) return 'video'
   if (['mp3', 'wav', 'aac', 'flac', 'ogg', 'opus', 'aif', 'aiff'].includes(ext)) return 'audio'
   return 'unknown'
 }
 export const getOperationsForFile = (filename: string): FileOperation[] =>
-  operationMap[getFileCategory(filename)]
+  ['ppt', 'pptx'].includes(getFileExtension(filename))
+    ? presentationOperations
+    : operationMap[getFileCategory(filename)]
 
 /** Actions revealed while Q is held during a file drag. */
 const imageToolOperations = entries([
@@ -115,7 +121,7 @@ export const getFileToolOperations = (filename: string): FileOperation[] =>
       ? videoToolOperations
       : getFileCategory(filename) === 'audio'
         ? audioToolOperations
-        : getFileCategory(filename) === 'document'
+        : getFileExtension(filename) === 'pdf'
           ? documentToolOperations
           : []
 export const formatFileSize = (bytes: number): string =>

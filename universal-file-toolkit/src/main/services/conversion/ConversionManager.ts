@@ -1,8 +1,8 @@
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import type { Stats } from 'node:fs'
 import { basename, isAbsolute, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { app } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import sharp from 'sharp'
@@ -12,6 +12,7 @@ import { OutputManager } from './OutputManager'
 import type {
   ConversionResult,
   DocumentTargetFormat,
+  DocumentConversionRequest,
   AudioCompressionRequest,
   AudioNormalizeRequest,
   AudioTrimRequest,
@@ -81,6 +82,45 @@ on run argv
     open sourceFile
     delay 0.5
     save front document in destinationFile
+    close front document saving no
+  end tell
+end run
+`
+
+const documentToPdfScript = String.raw`
+on run argv
+  set sourceFile to POSIX file (item 1 of argv)
+  set destinationFile to POSIX file (item 2 of argv)
+  tell application "Pages"
+    open sourceFile
+    delay 0.5
+    export front document to destinationFile as PDF
+    close front document saving no
+  end tell
+end run
+`
+
+const documentToEpubScript = String.raw`
+on run argv
+  set sourceFile to POSIX file (item 1 of argv)
+  set destinationFile to POSIX file (item 2 of argv)
+  tell application "Pages"
+    open sourceFile
+    delay 0.5
+    export front document to destinationFile as EPUB
+    close front document saving no
+  end tell
+end run
+`
+
+const presentationToPdfScript = String.raw`
+on run argv
+  set sourceFile to POSIX file (item 1 of argv)
+  set destinationFile to POSIX file (item 2 of argv)
+  tell application "Keynote"
+    open sourceFile
+    delay 0.5
+    export front document to destinationFile as PDF
     close front document saving no
   end tell
 end run
@@ -217,6 +257,12 @@ export class ConversionManager {
     )
   }
 
+  convertDocument(request: DocumentConversionRequest): Promise<ConversionResult> {
+    return this.startJob(`${resolve(request.inputPath)}:document:${request.targetFormat}`, () =>
+      this.performDocumentConversion(request)
+    )
+  }
+
   compressPdf(request: PdfCompressionRequest): Promise<ConversionResult> {
     return this.startJob(`${resolve(request.inputPath)}:pdf-compress`, () =>
       this.performPdfCompression(request)
@@ -224,7 +270,8 @@ export class ConversionManager {
   }
 
   async splitPdf(request: PdfSplitRequest): Promise<{ outputPaths: string[] }> {
-    if (process.platform !== 'darwin') throw new Error('PDF splitting is currently available on macOS.')
+    if (process.platform !== 'darwin')
+      throw new Error('PDF splitting is currently available on macOS.')
     if (!isAbsolute(request.inputPath)) throw new Error('The input file path must be absolute.')
     if (!Number.isInteger(request.startPage) || !Number.isInteger(request.endPage))
       throw new Error('Choose whole page numbers.')
@@ -270,16 +317,20 @@ export class ConversionManager {
   }
 
   async organizePdf(request: PdfOrganizeRequest): Promise<ConversionResult> {
-    if (process.platform !== 'darwin') throw new Error('PDF organization is currently available on macOS.')
+    if (process.platform !== 'darwin')
+      throw new Error('PDF organization is currently available on macOS.')
     if (!isAbsolute(request.inputPath)) throw new Error('The input file path must be absolute.')
-    if (!Array.isArray(request.pageOrder) || !request.pageOrder.length || request.pageOrder.length > 10_000)
+    if (
+      !Array.isArray(request.pageOrder) ||
+      !request.pageOrder.length ||
+      request.pageOrder.length > 10_000
+    )
       throw new Error('Keep between 1 and 10,000 PDF pages.')
     if (
       !request.pageRotations ||
       typeof request.pageRotations !== 'object' ||
       !Object.entries(request.pageRotations).every(
-        ([page, rotation]) =>
-          Number.isInteger(Number(page)) && [0, 90, 180, 270].includes(rotation)
+        ([page, rotation]) => Number.isInteger(Number(page)) && [0, 90, 180, 270].includes(rotation)
       )
     )
       throw new Error('The PDF page rotations are invalid.')
@@ -322,10 +373,13 @@ export class ConversionManager {
     const source = await stat(inputPath)
     if (!source.isFile() || inputPath.split('.').pop()?.toLowerCase() !== 'pdf')
       throw new Error('Select a valid PDF file.')
-    const { stdout } = await execFileAsync(
-      '/usr/bin/osascript',
-      ['-l', 'JavaScript', '-e', pdfMetadataScript, inputPath]
-    )
+    const { stdout } = await execFileAsync('/usr/bin/osascript', [
+      '-l',
+      'JavaScript',
+      '-e',
+      pdfMetadataScript,
+      inputPath
+    ])
     try {
       const metadata = JSON.parse(stdout) as Record<string, unknown>
       const items: Array<{ key: string; value: string }> = [
@@ -439,8 +493,14 @@ export class ConversionManager {
       () => this.performAudioTrim(request, onProgress)
     )
   }
-  bleepAudio(request: AudioBleepRequest, onProgress?: (percent: number) => void): Promise<ConversionResult> {
-    return this.startJob(`${resolve(request.inputPath)}:audio-bleep:${request.startSeconds}:${request.endSeconds}`, () => this.performAudioBleep(request, onProgress))
+  bleepAudio(
+    request: AudioBleepRequest,
+    onProgress?: (percent: number) => void
+  ): Promise<ConversionResult> {
+    return this.startJob(
+      `${resolve(request.inputPath)}:audio-bleep:${request.startSeconds}:${request.endSeconds}`,
+      () => this.performAudioBleep(request, onProgress)
+    )
   }
 
   async getVideoMetadata(inputPathValue: string): Promise<Array<{ key: string; value: string }>> {
@@ -825,10 +885,41 @@ export class ConversionManager {
       throw error
     }
   }
-  private async performAudioBleep(request: AudioBleepRequest, onProgress?: (percent: number) => void): Promise<ConversionResult> {
+  private async performAudioBleep(
+    request: AudioBleepRequest,
+    onProgress?: (percent: number) => void
+  ): Promise<ConversionResult> {
     const { inputPath, source, normalizedSource } = await this.prepareMediaInput(request.inputPath)
-    const startedAt = Date.now(); const temporaryPath = `${await this.outputManager.createTemporaryPath(inputPath)}.mp3`
-    try { await this.ffmpegVideoConverter.bleepAudio(inputPath, temporaryPath, request.startSeconds, request.endSeconds, onProgress); const outputPath = await this.outputManager.publishTemporaryFile(temporaryPath, inputPath, 'mp3', '-bleeped'); const output = await stat(outputPath); return this.result(inputPath, outputPath, normalizedSource, 'mp3', source.size, output.size, startedAt) } catch (error) { await this.outputManager.discardTemporaryFile(temporaryPath); throw error }
+    const startedAt = Date.now()
+    const temporaryPath = `${await this.outputManager.createTemporaryPath(inputPath)}.mp3`
+    try {
+      await this.ffmpegVideoConverter.bleepAudio(
+        inputPath,
+        temporaryPath,
+        request.startSeconds,
+        request.endSeconds,
+        onProgress
+      )
+      const outputPath = await this.outputManager.publishTemporaryFile(
+        temporaryPath,
+        inputPath,
+        'mp3',
+        '-bleeped'
+      )
+      const output = await stat(outputPath)
+      return this.result(
+        inputPath,
+        outputPath,
+        normalizedSource,
+        'mp3',
+        source.size,
+        output.size,
+        startedAt
+      )
+    } catch (error) {
+      await this.outputManager.discardTemporaryFile(temporaryPath)
+      throw error
+    }
   }
 
   private async performVideoMute(
@@ -1053,6 +1144,238 @@ export class ConversionManager {
     }
   }
 
+  private async performDocumentConversion(
+    request: DocumentConversionRequest
+  ): Promise<ConversionResult> {
+    if (process.platform !== 'darwin')
+      throw new Error('DOC and DOCX to PDF conversion is currently available on macOS.')
+    if (!isAbsolute(request.inputPath)) throw new Error('The input file path must be absolute.')
+    const inputPath = resolve(request.inputPath)
+    const source = await stat(inputPath)
+    if (!source.isFile()) throw new Error('The selected document is not a regular file.')
+    if (source.size === 0) throw new Error('The selected document is empty.')
+    if (source.size > 512 * 1024 * 1024)
+      throw new Error('The selected document exceeds the 512 MB limit.')
+    const sourceFormat = inputPath.split('.').pop()?.toLowerCase() ?? ''
+    if (!['doc', 'docx', 'ppt', 'pptx'].includes(sourceFormat))
+      throw new Error('Select a DOC, DOCX, PPT, or PPTX file to convert.')
+    const startedAt = Date.now()
+    const temporaryBasePath = await this.outputManager.createTemporaryPath(inputPath)
+    const requiresPages = ['pages', 'epub'].includes(request.targetFormat)
+    if (requiresPages) {
+      try {
+        const pagesApp = await stat('/Applications/Pages.app')
+        if (!pagesApp.isDirectory()) throw new Error('Apple Pages is not installed.')
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : ''
+        throw new Error(
+          detail === 'Apple Pages is not installed.'
+            ? detail
+            : `Apple Pages is required to create ${request.targetFormat.toUpperCase()} from this document. Install Pages and try again.`
+        )
+      }
+    }
+    const textPath = `${temporaryBasePath}.txt`
+    const htmlPath = `${temporaryBasePath}.html`
+    const pagesPath = `${temporaryBasePath}.pages`
+    const epubPath = `${temporaryBasePath}.epub`
+    const pdfPath = `${temporaryBasePath}.pdf`
+    const imagePath = `${temporaryBasePath}.${request.targetFormat}`
+    try {
+      if (
+        ['ppt', 'pptx'].includes(sourceFormat) &&
+        !['pdf', 'png', 'jpg'].includes(request.targetFormat)
+      ) {
+        throw new Error('Presentations can be converted to PDF, PNG, or JPG.')
+      }
+      if (request.targetFormat === 'txt' || request.targetFormat === 'md') {
+        await execFileAsync('/usr/bin/textutil', [
+          '-convert',
+          'txt',
+          '-output',
+          textPath,
+          inputPath
+        ])
+        if (request.targetFormat === 'md') {
+          const text = await readFile(textPath, 'utf8')
+          await writeFile(
+            textPath,
+            text.trim() ? `# ${basename(inputPath, `.${sourceFormat}`)}\n\n${text.trim()}\n` : '',
+            'utf8'
+          )
+        }
+      } else if (request.targetFormat === 'html') {
+        await execFileAsync('/usr/bin/textutil', [
+          '-convert',
+          'html',
+          '-output',
+          htmlPath,
+          inputPath
+        ])
+      } else if (request.targetFormat === 'pages') {
+        await execFileAsync('/usr/bin/osascript', [
+          '-l',
+          'AppleScript',
+          '-e',
+          docxToPagesScript,
+          inputPath,
+          pagesPath
+        ])
+      } else if (request.targetFormat === 'epub') {
+        await execFileAsync('/usr/bin/osascript', [
+          '-l',
+          'AppleScript',
+          '-e',
+          documentToEpubScript,
+          inputPath,
+          epubPath
+        ])
+      } else {
+        await this.exportDocumentPdf(inputPath, pdfPath, temporaryBasePath, sourceFormat)
+        if (request.targetFormat === 'jpg' || request.targetFormat === 'png') {
+          await execFileAsync('/usr/bin/sips', [
+            '-s',
+            'format',
+            request.targetFormat === 'jpg' ? 'jpeg' : 'png',
+            pdfPath,
+            '--out',
+            imagePath
+          ])
+        }
+      }
+      const temporaryPath =
+        request.targetFormat === 'txt' || request.targetFormat === 'md'
+          ? textPath
+          : request.targetFormat === 'html'
+            ? htmlPath
+            : request.targetFormat === 'pages'
+              ? pagesPath
+              : request.targetFormat === 'epub'
+                ? epubPath
+                : request.targetFormat === 'pdf'
+                  ? pdfPath
+                  : imagePath
+      const outputPath = await this.outputManager.publishTemporaryFile(
+        temporaryPath,
+        inputPath,
+        request.targetFormat,
+        '-converted'
+      )
+      const output = await stat(outputPath)
+      return this.result(
+        inputPath,
+        outputPath,
+        sourceFormat,
+        request.targetFormat,
+        source.size,
+        output.size,
+        startedAt
+      )
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : ''
+      throw new Error(
+        detail || `Unable to convert the document to ${request.targetFormat.toUpperCase()}.`,
+        { cause: error }
+      )
+    } finally {
+      await Promise.all(
+        [textPath, htmlPath, pagesPath, epubPath, pdfPath, imagePath].map((path) =>
+          this.outputManager.discardTemporaryFile(path)
+        )
+      )
+    }
+  }
+
+  /** Uses Pages when available, otherwise renders textutil's HTML in Electron. */
+  private async exportDocumentPdf(
+    inputPath: string,
+    pdfPath: string,
+    temporaryBasePath: string,
+    sourceFormat: string
+  ): Promise<void> {
+    if (sourceFormat === 'ppt' || sourceFormat === 'pptx') {
+      try {
+        const keynoteApp = await stat('/Applications/Keynote.app')
+        if (!keynoteApp.isDirectory()) throw new Error('Apple Keynote is not installed.')
+        await execFileAsync('/usr/bin/osascript', [
+          '-l',
+          'AppleScript',
+          '-e',
+          presentationToPdfScript,
+          inputPath,
+          pdfPath
+        ])
+        return
+      } catch {
+        const previewDirectory = `${temporaryBasePath}-presentation-preview`
+        await mkdir(previewDirectory, { recursive: true })
+        try {
+          await execFileAsync('/usr/bin/qlmanage', ['-p', '-o', previewDirectory, inputPath])
+          const previewPath = (await readdir(previewDirectory, { recursive: true })).find((path) =>
+            path.toLowerCase().endsWith('.html')
+          )
+          if (!previewPath) {
+            throw new Error('Quick Look did not create a presentation preview.')
+          }
+          const renderer = new BrowserWindow({
+            show: false,
+            webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
+          })
+          try {
+            await renderer.loadFile(join(previewDirectory, previewPath))
+            await writeFile(
+              pdfPath,
+              await renderer.webContents.printToPDF({ printBackground: true })
+            )
+          } finally {
+            renderer.destroy()
+          }
+          return
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : ''
+          throw new Error(detail || 'Install Apple Keynote to convert this presentation to PDF.', {
+            cause: error
+          })
+        } finally {
+          await rm(previewDirectory, { force: true, recursive: true }).catch(() => undefined)
+        }
+      }
+    }
+    try {
+      const pagesApp = await stat('/Applications/Pages.app')
+      if (!pagesApp.isDirectory()) throw new Error('Apple Pages is not installed.')
+      await execFileAsync('/usr/bin/osascript', [
+        '-l',
+        'AppleScript',
+        '-e',
+        documentToPdfScript,
+        inputPath,
+        pdfPath
+      ])
+      return
+    } catch {
+      const htmlPath = `${temporaryBasePath}.pdf-render.html`
+      const renderer = new BrowserWindow({
+        show: false,
+        webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
+      })
+      try {
+        await execFileAsync('/usr/bin/textutil', [
+          '-convert',
+          'html',
+          '-output',
+          htmlPath,
+          inputPath
+        ])
+        await renderer.loadFile(htmlPath)
+        await writeFile(pdfPath, await renderer.webContents.printToPDF({ printBackground: true }))
+      } finally {
+        renderer.destroy()
+        await this.outputManager.discardTemporaryFile(htmlPath)
+      }
+    }
+  }
+
   private async performPdfToDocx(request: PdfConversionRequest): Promise<ConversionResult> {
     if (process.platform !== 'darwin')
       throw new Error('PDF to DOCX conversion is currently available on macOS.')
@@ -1061,7 +1384,8 @@ export class ConversionManager {
     const source = await stat(inputPath)
     if (!source.isFile()) throw new Error('The selected PDF is not a regular file.')
     if (source.size === 0) throw new Error('The selected PDF is empty.')
-    if (source.size > 512 * 1024 * 1024) throw new Error('The selected PDF exceeds the 512 MB limit.')
+    if (source.size > 512 * 1024 * 1024)
+      throw new Error('The selected PDF exceeds the 512 MB limit.')
     if (inputPath.split('.').pop()?.toLowerCase() !== 'pdf')
       throw new Error('Select a PDF file to convert to DOCX.')
 
@@ -1096,9 +1420,12 @@ export class ConversionManager {
         )
       } catch (error) {
         const detail = error instanceof Error ? error.message : ''
-        throw new Error(detail || `Unable to convert the first PDF page to ${request.targetFormat}.`, {
-          cause: error
-        })
+        throw new Error(
+          detail || `Unable to convert the first PDF page to ${request.targetFormat}.`,
+          {
+            cause: error
+          }
+        )
       } finally {
         await this.outputManager.discardTemporaryFile(imagePath)
       }
@@ -1117,7 +1444,9 @@ export class ConversionManager {
       const extractedPages = await this.extractPdfTextPages(inputPath)
       const extractedText = extractedPages.join('\n\n').trim()
       if (!extractedText)
-        throw new Error('This PDF has no selectable text. Scanned PDFs need OCR before DOCX export.')
+        throw new Error(
+          'This PDF has no selectable text. Scanned PDFs need OCR before DOCX export.'
+        )
       await writeFile(textPath, extractedText, 'utf8')
       if (request.targetFormat === 'txt') {
         const outputPath = await this.outputManager.publishTemporaryFile(
@@ -1143,13 +1472,7 @@ export class ConversionManager {
         const output = await stat(outputPath)
         return this.result(inputPath, outputPath, 'pdf', 'md', source.size, output.size, startedAt)
       }
-      await execFileAsync('/usr/bin/textutil', [
-        '-convert',
-        'docx',
-        '-output',
-        docxPath,
-        textPath
-      ])
+      await execFileAsync('/usr/bin/textutil', ['-convert', 'docx', '-output', docxPath, textPath])
       if (request.targetFormat === 'pages') {
         try {
           const pagesApp = await stat('/Applications/Pages.app')
@@ -1177,7 +1500,15 @@ export class ConversionManager {
           '-converted'
         )
         const output = await stat(outputPath)
-        return this.result(inputPath, outputPath, 'pdf', 'pages', source.size, output.size, startedAt)
+        return this.result(
+          inputPath,
+          outputPath,
+          'pdf',
+          'pages',
+          source.size,
+          output.size,
+          startedAt
+        )
       }
       if (request.targetFormat === 'pptx') {
         await this.createTextPresentation(extractedPages, pptxDirectory, pptxPath)
@@ -1188,7 +1519,15 @@ export class ConversionManager {
           '-converted'
         )
         const output = await stat(outputPath)
-        return this.result(inputPath, outputPath, 'pdf', 'pptx', source.size, output.size, startedAt)
+        return this.result(
+          inputPath,
+          outputPath,
+          'pdf',
+          'pptx',
+          source.size,
+          output.size,
+          startedAt
+        )
       }
       if (request.targetFormat === 'xlsx') {
         await this.createTextSpreadsheet(extractedPages, xlsxDirectory, xlsxPath)
@@ -1199,7 +1538,15 @@ export class ConversionManager {
           '-converted'
         )
         const output = await stat(outputPath)
-        return this.result(inputPath, outputPath, 'pdf', 'xlsx', source.size, output.size, startedAt)
+        return this.result(
+          inputPath,
+          outputPath,
+          'pdf',
+          'xlsx',
+          source.size,
+          output.size,
+          startedAt
+        )
       }
       if (request.targetFormat === 'epub') {
         await this.createEpub(extractedPages, epubDirectory, epubPath)
@@ -1210,7 +1557,15 @@ export class ConversionManager {
           '-converted'
         )
         const output = await stat(outputPath)
-        return this.result(inputPath, outputPath, 'pdf', 'epub', source.size, output.size, startedAt)
+        return this.result(
+          inputPath,
+          outputPath,
+          'pdf',
+          'epub',
+          source.size,
+          output.size,
+          startedAt
+        )
       }
       const outputPath = await this.outputManager.publishTemporaryFile(
         docxPath,
@@ -1245,7 +1600,8 @@ export class ConversionManager {
     const source = await stat(inputPath)
     if (!source.isFile()) throw new Error('The selected PDF is not a regular file.')
     if (source.size === 0) throw new Error('The selected PDF is empty.')
-    if (source.size > 512 * 1024 * 1024) throw new Error('The selected PDF exceeds the 512 MB limit.')
+    if (source.size > 512 * 1024 * 1024)
+      throw new Error('The selected PDF exceeds the 512 MB limit.')
     if (inputPath.split('.').pop()?.toLowerCase() !== 'pdf')
       throw new Error('Select a PDF file to compress.')
     const startedAt = Date.now()
@@ -1334,7 +1690,10 @@ export class ConversionManager {
     ])
     await Promise.all(
       pages.map((page, index) =>
-        writeFile(join(packageDirectory, 'ppt', 'slides', `slide${index + 1}.xml`), this.pptxSlide(page, index + 1))
+        writeFile(
+          join(packageDirectory, 'ppt', 'slides', `slide${index + 1}.xml`),
+          this.pptxSlide(page, index + 1)
+        )
       )
     )
     await execFileAsync('/usr/bin/zip', ['-q', '-r', outputPath, '.'], { cwd: packageDirectory })
@@ -1430,14 +1789,9 @@ export class ConversionManager {
           `<item id="chapter-${index + 1}" href="text/chapter-${index + 1}.xhtml" media-type="application/xhtml+xml"/>`
       )
       .join('')
-    const spine = pages
-      .map((_, index) => `<itemref idref="chapter-${index + 1}"/>`)
-      .join('')
+    const spine = pages.map((_, index) => `<itemref idref="chapter-${index + 1}"/>`).join('')
     const navigation = pages
-      .map(
-        (_, index) =>
-          `<li><a href="text/chapter-${index + 1}.xhtml">Page ${index + 1}</a></li>`
-      )
+      .map((_, index) => `<li><a href="text/chapter-${index + 1}.xhtml">Page ${index + 1}</a></li>`)
       .join('')
     await Promise.all([
       writeFile(join(packageDirectory, 'mimetype'), 'application/epub+zip'),
@@ -1728,7 +2082,8 @@ export class ConversionManager {
     inputPath: string,
     outputPath: string,
     sourceFormat: string,
-    targetFormat: ImageTargetFormat | VideoTargetFormat | ArchiveTargetFormat | DocumentTargetFormat,
+    targetFormat:
+      ImageTargetFormat | VideoTargetFormat | ArchiveTargetFormat | DocumentTargetFormat,
     originalSize: number,
     outputSize: number,
     startedAt: number

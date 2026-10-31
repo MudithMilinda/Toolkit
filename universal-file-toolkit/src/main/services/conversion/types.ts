@@ -4,7 +4,8 @@ export type ImageTargetFormat = 'png' | 'jpg' | 'webp' | 'pdf' | 'heic' | 'tiff'
 export type VideoTargetFormat =
   'mp4' | 'mov' | 'mp3' | 'gif' | 'webm' | 'mkv' | 'avi' | 'wav' | 'flac' | 'ogg' | 'opus' | 'aiff'
 export type ArchiveTargetFormat = 'zip'
-export type DocumentTargetFormat = 'docx' | 'pages' | 'pptx' | 'xlsx' | 'epub' | 'txt' | 'md'
+export type DocumentTargetFormat =
+  'docx' | 'pages' | 'pptx' | 'xlsx' | 'epub' | 'txt' | 'md' | 'html'
 
 export interface ImageConversionOptions {
   /** Preserve EXIF/XMP/ICC metadata only when the user explicitly asks for it. */
@@ -23,6 +24,10 @@ export interface ImageConversionRequest {
 export interface PdfConversionRequest {
   inputPath: string
   targetFormat: DocumentTargetFormat | 'jpg' | 'png'
+}
+export interface DocumentConversionRequest {
+  inputPath: string
+  targetFormat: 'pdf' | 'pages' | 'epub' | 'txt' | 'md' | 'html' | 'jpg' | 'png'
 }
 export interface PdfCompressionRequest {
   inputPath: string
@@ -70,7 +75,12 @@ export interface AudioTrimRequest {
   startSeconds: number
   endSeconds: number
 }
-export interface AudioBleepRequest { inputPath: string; operation: 'audio-bleep'; startSeconds: number; endSeconds: number }
+export interface AudioBleepRequest {
+  inputPath: string
+  operation: 'audio-bleep'
+  startSeconds: number
+  endSeconds: number
+}
 export interface VideoTrimRequest {
   inputPath: string
   operation: 'video-trim'
