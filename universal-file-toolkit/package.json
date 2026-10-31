@@ -1,9 +1,9 @@
 {
-  "name": "universal-file-toolkit",
+  "name": "droplet",
   "version": "1.0.0",
-  "description": "A floating local file utility with a radial operation menu",
+  "description": "Droplet is a floating local file utility with a radial operation menu",
   "main": "./out/main/index.js",
-  "author": "Universal File Toolkit",
+  "author": "Droplet",
   "scripts": {
     "format": "prettier --write .",
     "lint": "eslint --cache .",

@@ -1,6 +1,9 @@
 declare global {
   interface Window {
     api: {
+      getOnboardingStatus: () => Promise<boolean>
+      completeOnboarding: () => Promise<void>
+      hideOnboarding: () => Promise<void>
       closeRadialMenu: () => Promise<void>
       notifyRadialMenuReady: () => void
       notifyDropReceived: () => void
@@ -243,6 +246,7 @@ declare global {
       onRadialMenuModifier: (listener: (modifier: 'shift' | 'command') => void) => () => void
       onRadialMenuDragFile: (listener: (fileName: string) => void) => () => void
       onSettingsRequested: (listener: () => void) => () => void
+      onOnboardingRequested: (listener: () => void) => () => void
     }
   }
 }

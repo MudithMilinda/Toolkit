@@ -1,5 +1,5 @@
-appId: com.universalfiletoolkit.desktop
-productName: Universal File Toolkit
+appId: com.droplet.desktop
+productName: Droplet
 directories:
   buildResources: build
 files:
@@ -20,7 +20,7 @@ extraResources:
   - from: native/macos/bin/video-converter
     to: native/video-converter
 win:
-  executableName: universal-file-toolkit
+  executableName: droplet
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
@@ -38,7 +38,7 @@ mac:
   entitlementsInherit: build/entitlements.mac.plist
   notarize: false
 dmg:
-  artifactName: universal-file-toolkit-${version}-${arch}.${ext}
+  artifactName: droplet-${version}-${arch}.${ext}
 linux:
   target:
     - AppImage

@@ -4,6 +4,7 @@ import {
   globalShortcut,
   ipcMain,
   Menu,
+  nativeImage,
   protocol,
   screen,
   shell,
@@ -11,7 +12,7 @@ import {
 } from 'electron'
 import { execFile } from 'node:child_process'
 import { basename, join } from 'path'
-import { readFile, stat } from 'node:fs/promises'
+import { readFile, stat, writeFile } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 import { Readable } from 'node:stream'
 import { isAbsolute, resolve } from 'node:path'
@@ -20,6 +21,7 @@ import sharp from 'sharp'
 import { promisify } from 'node:util'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
+import menuBarIcon from '../../resources/menu-bar-icon.png?asset'
 import { createNativeIntegration } from './native-integration'
 import { ConversionManager } from './services/conversion/ConversionManager'
 import type {
@@ -51,9 +53,21 @@ const execFileAsync = promisify(execFile)
 let nativeDismissTimer: ReturnType<typeof setTimeout> | null = null
 let nativeDragCandidateVisible = false
 let pendingRadialMenuFocus: boolean | null = null
+let toolkitEnabled = true
 const localMediaSources = new Map<string, string>()
 // The crop editor needs room for a comfortably sized preview and its controls.
 const MENU_SIZE = 660
+const onboardingStatePath = (): string => join(app.getPath('userData'), 'onboarding.json')
+const hasCompletedOnboarding = async (): Promise<boolean> => {
+  try {
+    const value = JSON.parse(await readFile(onboardingStatePath(), 'utf8')) as {
+      completed?: boolean
+    }
+    return value.completed === true
+  } catch {
+    return false
+  }
+}
 const shortcuts =
   process.platform === 'darwin'
     ? ['CommandOrControl+Shift+Space', 'Control+Shift+Space', 'CommandOrControl+Alt+Space']
@@ -437,7 +451,7 @@ function isImageBackgroundRemovalRequest(value: unknown): value is ImageBackgrou
 }
 
 function showRadialMenu(focus = true): void {
-  if (!radialWindow) return
+  if (!toolkitEnabled || !radialWindow) return
   // A new drag can start during the old panel's close animation. Hide the
   // reused native window first so its previous React frame can never flash.
   radialWindow.hide()
@@ -460,6 +474,7 @@ function showRadialMenu(focus = true): void {
 }
 
 function showNativeDragCandidate(modifier: 'shift' | 'command', fileName?: string): void {
+  if (!toolkitEnabled) return
   if (nativeDismissTimer) clearTimeout(nativeDismissTimer)
   nativeDragCandidateVisible = true
   nativeDragFileName = fileName ?? null
@@ -474,9 +489,46 @@ function showNativeDragCandidate(modifier: 'shift' | 'command', fileName?: strin
   if (fileName) radialWindow?.webContents.send('radial-menu:drag-file', fileName)
 }
 
-function showSettings(): void {
-  showRadialMenu()
-  radialWindow?.webContents.send('radial-menu:settings')
+function showOnboarding(): void {
+  if (!radialWindow) return
+  radialWindow.show()
+  radialWindow.focus()
+  radialWindow.webContents.send('onboarding:show')
+}
+
+function refreshTrayMenu(): void {
+  tray?.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: 'How Droplet works', click: showOnboarding },
+      { type: 'separator' },
+      {
+        label: 'Open radial menu',
+        accelerator: 'CommandOrControl+Shift+Space',
+        enabled: toolkitEnabled,
+        click: () => showRadialMenu()
+      },
+      {
+        label: 'Open radial menu (fallback)',
+        accelerator: 'CommandOrControl+Alt+Space',
+        enabled: toolkitEnabled,
+        click: () => showRadialMenu()
+      },
+      { type: 'separator' },
+      {
+        label: toolkitEnabled ? 'Stop' : 'Start',
+        click: () => {
+          toolkitEnabled = !toolkitEnabled
+          if (!toolkitEnabled) {
+            nativeDragCandidateVisible = false
+            radialWindow?.hide()
+          }
+          refreshTrayMenu()
+        }
+      },
+      { type: 'separator' },
+      { label: 'Quit', click: () => app.quit() }
+    ])
+  )
 }
 
 function createWindow(): void {
@@ -506,6 +558,13 @@ function createWindow(): void {
     if (!nativeDragCandidateVisible) radialWindow?.hide()
   })
   radialWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  radialWindow.webContents.once('did-finish-load', () => {
+    void hasCompletedOnboarding().then((completed) => {
+      if (completed || !radialWindow) return
+      radialWindow.show()
+      radialWindow.focus()
+    })
+  })
 
   // HMR for renderer base on electron-vite cli.
   // Load the remote URL for development or the local html file for production.
@@ -517,26 +576,12 @@ function createWindow(): void {
 }
 
 function createTray(): void {
-  tray = new Tray(icon)
-  tray.setToolTip('Universal File Toolkit')
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      {
-        label: 'Open radial menu',
-        accelerator: 'CommandOrControl+Shift+Space',
-        click: () => showRadialMenu()
-      },
-      {
-        label: 'Open radial menu (fallback)',
-        accelerator: 'CommandOrControl+Alt+Space',
-        click: () => showRadialMenu()
-      },
-      { label: 'Settings', click: showSettings },
-      { type: 'separator' },
-      { label: 'Quit', click: () => app.quit() }
-    ])
-  )
-  tray.on('click', () => showRadialMenu())
+  const trayIcon = nativeImage.createFromPath(process.platform === 'darwin' ? menuBarIcon : icon)
+  if (process.platform === 'darwin') trayIcon.setTemplateImage(true)
+  tray = new Tray(trayIcon)
+  tray.setToolTip('Droplet')
+  refreshTrayMenu()
+  tray.on('click', () => tray?.popUpContextMenu())
 }
 
 // This method will be called when Electron has finished
@@ -591,6 +636,7 @@ app.whenReady().then(() => {
   nativeIntegration.start({
     onModifierDragCandidate: showNativeDragCandidate,
     onModifierChanged: (modifier) => {
+      if (!toolkitEnabled) return
       const extension = nativeDragFileName?.split('.').pop()?.toLowerCase()
       if (modifier === 'command' && ['doc', 'docx', 'ppt', 'pptx'].includes(extension ?? '')) {
         radialWindow?.hide()
@@ -630,6 +676,11 @@ app.whenReady().then(() => {
     nativeDragCandidateVisible = false
     radialWindow?.hide()
   })
+  ipcMain.handle('onboarding:status', () => hasCompletedOnboarding())
+  ipcMain.handle('onboarding:complete', async () => {
+    await writeFile(onboardingStatePath(), JSON.stringify({ completed: true }), 'utf8')
+  })
+  ipcMain.handle('onboarding:hide', () => radialWindow?.hide())
   ipcMain.handle('email:compose', async (_, inputPathValue: unknown) => {
     if (typeof inputPathValue !== 'string' || !isAbsolute(inputPathValue))
       throw new Error('Invalid attachment path.')

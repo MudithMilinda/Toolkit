@@ -21,6 +21,8 @@ import VideoSpeedPanel from './components/VideoSpeedPanel'
 import ImageCropPanel from './components/ImageCropPanel'
 import ImageEditPanel from './components/ImageEditPanel'
 import ImageMetadataPanel from './components/ImageMetadataPanel'
+import OnboardingPanel from './components/OnboardingPanel'
+import HowItWorksPanel from './components/HowItWorksPanel'
 import { useFileDrop } from './hooks/useFileDrop'
 import {
   getFileCategory,
@@ -41,6 +43,8 @@ function App(): React.JSX.Element {
   const [dragModifier, setDragModifier] = useState<'shift' | 'command'>('shift')
   const [draggedFileName, setDraggedFileName] = useState<string | null>(null)
   const [menuOpenVersion, setMenuOpenVersion] = useState(0)
+  const [showOnboarding, setShowOnboarding] = useState(false)
+  const [showHowItWorks, setShowHowItWorks] = useState(false)
   const [optionsMode, setOptionsMode] = useState<
     | 'resize'
     | 'compress'
@@ -63,6 +67,28 @@ function App(): React.JSX.Element {
     | 'metadata'
     | null
   >(null)
+  useEffect(() => {
+    void window.api.getOnboardingStatus().then((completed) => setShowOnboarding(!completed))
+  }, [])
+  useEffect(
+    () =>
+      window.api.onOnboardingRequested(() => {
+        setShowHowItWorks(true)
+        setShowOnboarding(true)
+      }),
+    []
+  )
+  const completeOnboarding = useCallback((): void => {
+    void window.api.completeOnboarding()
+    setShowHowItWorks(false)
+    setShowOnboarding(false)
+    void window.api.hideOnboarding()
+  }, [])
+  const closeHowItWorks = useCallback((): void => {
+    setShowHowItWorks(false)
+    setShowOnboarding(false)
+    void window.api.hideOnboarding()
+  }, [])
   useEffect(
     () =>
       window.api.onVideoConversionProgress((percent) => {
@@ -760,9 +786,15 @@ function App(): React.JSX.Element {
 
   return (
     <AppLayout>
+      {showOnboarding &&
+        (showHowItWorks ? (
+          <HowItWorksPanel onClose={closeHowItWorks} />
+        ) : (
+          <OnboardingPanel onComplete={completeOnboarding} />
+        ))}
       <section
-        className="relative z-1 grid size-full place-items-center"
-        aria-label="Universal File Toolkit"
+        className={`relative z-1 grid size-full place-items-center${showOnboarding ? ' invisible' : ''}`}
+        aria-label="Droplet"
       >
         <DropZone
           dragHandlers={dragHandlers}

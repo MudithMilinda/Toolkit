@@ -2,6 +2,9 @@ import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 // The renderer receives only the two fixed, capability-scoped operations it needs.
 const api = Object.freeze({
+  getOnboardingStatus: (): Promise<boolean> => ipcRenderer.invoke('onboarding:status'),
+  completeOnboarding: (): Promise<void> => ipcRenderer.invoke('onboarding:complete'),
+  hideOnboarding: (): Promise<void> => ipcRenderer.invoke('onboarding:hide'),
   closeRadialMenu: (): Promise<void> => ipcRenderer.invoke('radial-menu:close'),
   notifyRadialMenuReady: (): void => ipcRenderer.send('radial-menu:ready'),
   notifyDropReceived: (): void => ipcRenderer.send('radial-menu:drop-received'),
@@ -294,6 +297,11 @@ const api = Object.freeze({
     const handler = (): void => listener()
     ipcRenderer.on('radial-menu:settings', handler)
     return () => ipcRenderer.removeListener('radial-menu:settings', handler)
+  },
+  onOnboardingRequested: (listener: () => void): (() => void) => {
+    const handler = (): void => listener()
+    ipcRenderer.on('onboarding:show', handler)
+    return () => ipcRenderer.removeListener('onboarding:show', handler)
   }
 })
 
